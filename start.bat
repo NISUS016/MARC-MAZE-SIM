@@ -21,7 +21,12 @@ echo [2/3] Installing dependencies (pygame)...
 python -m pip install --upgrade pip >nul 2>nul
 python -m pip install -r requirements.txt
 if errorlevel 1 (
+    echo [WARN] Standard install failed, retrying pygame-ce directly...
+    python -m pip install "pygame-ce>=2.5.0"
+)
+if errorlevel 1 (
     echo [ERROR] Could not install dependencies. Check your internet connection.
+    echo You can also try manually:  python -m pip install pygame-ce
     pause
     exit /b 1
 )
