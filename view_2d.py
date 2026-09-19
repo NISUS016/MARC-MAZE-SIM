@@ -319,9 +319,6 @@ def run_main(screen, clock, fonts, sim, cfg):
         lay.update(cell=cell, grid=grid, ox=ox, oy=oy, panel_h=panel_h)
         px = ox + grid + 20
 
-        def B(y, w, label, action, enabled_fn=None, accent=False):
-            return Button((0, y, w, 30), label, action, enabled_fn, accent)
-
         bw = (PANEL_W - 16 - 8) // 2
         buttons = [
             Button((px, oy + 240, bw, 28), "Pause", toggle_auto),

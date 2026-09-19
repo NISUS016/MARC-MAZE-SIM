@@ -10,6 +10,7 @@ Repo: https://github.com/NISUS016/MARC-MAZE-SIM
 
 1. Install **Python 3.10 or newer** from https://www.python.org/downloads/
    (Windows: tick **"Add python.exe to PATH"** during installation).
+   Tested on: Windows, Python 3.14.2, pygame-ce 2.5.6.
 2. Get the code: `git clone https://github.com/NISUS016/MARC-MAZE-SIM.git`
    or download the ZIP from that page and extract it.
 3. Easiest launch — no terminal needed:
