@@ -34,7 +34,7 @@ def run_headless(maze, seed, size, algorithm):
         assert sim.astar_len <= sim.flood_len, "optimal <= exploration walk"
         print("OK: reached goal + returned; A* shorter or equal.")
     else:
-        print("NOTE: explorer got stuck (expected for wall-follower on loopy mazes).")
+        print("NOTE: explorer got stuck without reaching the goal.")
 
 
 def main():
@@ -49,7 +49,7 @@ def main():
                     help="maze size (default 16; start menu can change it in --2d)")
     ap.add_argument("--seed", type=int, default=None,
                     help="reproduce a maze, e.g. --seed 7")
-    ap.add_argument("--algo", choices=["flood", "dfs", "wall"], default="flood",
+    ap.add_argument("--algo", choices=["flood", "dijkstra", "dfs"], default="flood",
                     help="explorer algorithm (default flood)")
     ap.add_argument("--no-menu", action="store_true",
                     help="skip the start menu in --2d, use CLI options directly")

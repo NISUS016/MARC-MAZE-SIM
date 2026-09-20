@@ -7,6 +7,8 @@ Keys: SPACE step, R auto, S skip, T speedrun, X new maze, B back to menu,
 N/G/E/P/M/D toggles, +/- speed, ESC quit.
 """
 import math
+import time as _time
+
 import pygame
 
 from algos import ALGOS, ALGO_ORDER
@@ -245,14 +247,16 @@ def show_menu(screen, clock, fonts, defaults):
                     _toggle_algo("flood")
                 elif e.key == pygame.K_t and not seed_focus:
                     _toggle_algo("dfs")
-                elif e.key == pygame.K_w and not seed_focus:
-                    _toggle_algo("wall")
+                elif e.key == pygame.K_i and not seed_focus:
+                    _toggle_algo("dijkstra")
                 elif seed_focus and e.key == pygame.K_BACKSPACE:
                     seed_txt = seed_txt[:-1]
-                elif seed_focus and e.unicode.isdigit() and len(seed_txt) < 6:
-                    seed_txt += e.unicode
-                elif not seed_focus and e.unicode in "12345"[: len(SIZES)]:
-                    _set_size(SIZES[int(e.unicode) - 1])
+                else:
+                    uni = getattr(e, "unicode", "")
+                    if seed_focus and uni.isdigit() and len(seed_txt) < 6:
+                        seed_txt += uni
+                    elif not seed_focus and uni and uni in "12345"[: len(SIZES)]:
+                        _set_size(SIZES[int(uni) - 1])
 
         # ---- draw ----
         screen.fill(T["bg"])
@@ -272,7 +276,7 @@ def show_menu(screen, clock, fonts, defaults):
             b.accent = ((b.label.startswith("Random") and maze_kind == "random") or
                         (b.label.startswith("Classic") and maze_kind == "simple"))
             b.draw(screen, small, mouse, T)
-        screen.blit(font.render("ALGORITHMS  (F/T/W — race first, compare rest later)",
+        screen.blit(font.render("ALGORITHMS  (F/T/I — race first, compare rest later)",
                                 True, T["muted"]), (cx + 24, y + 178))
         for b in algo_btns:
             b.accent = (b.algo_key in picked)
@@ -319,6 +323,13 @@ def run_main(screen, clock, fonts, sim, cfg):
     acc = 0.0
     show_compare = False  # comparison table overlay (C after a solved race)
     compare_rows = []  # clickable row rects, rebuilt every frame while open
+    race_recorded = False  # current race logged to tourney_results yet?
+    tourney_queue = []  # algos still to auto-race on this maze
+    tourney_results = []  # metrics per finished race, in race order
+    tourney_prompt = False  # tournament complete -> offer the stats page
+    tourney_total = 1  # algos in this tournament (1 = plain single race)
+    stats_open = False  # visual stats/graphs page (H)
+    overlay_btns = []  # (rect, action) for prompt + stats buttons, rebuilt per frame
     switch_until = 0  # algo-switch animation expiry (ms ticks)
     switch_label = ""  # label shown by the switch banner
     switch_color = (255, 255, 255)  # new algo's accent color for banner + halo
@@ -393,7 +404,7 @@ def run_main(screen, clock, fonts, sim, cfg):
         return sim.phase in ("EXPLORE_TO_GOAL", "RETURN_TO_START")
 
     def can_speedrun():
-        return sim.phase == "OPTIMIZE" and bool(sim.optimal_path)
+        return bool(sim.optimal_path) and sim.phase in ("OPTIMIZE", "DONE")
 
     def speed_down():
         nonlocal speed
@@ -481,16 +492,79 @@ def run_main(screen, clock, fonts, sim, cfg):
 
     def _after_fresh_start():
         """Resync view animation with a freshly reset sim (replay/load/new)."""
-        nonlocal auto, acc, arrow_ang, prev_phase, switch_until
+        nonlocal auto, acc, arrow_ang, prev_phase, switch_until, race_recorded
         trail.clear()
         discover_walls.clear()
         switch_until = 0
+        race_recorded = False  # this race hasn't been logged to the tournament yet
         c = cell_rect(*sim.pos).center
         anim_xy[0], anim_xy[1] = float(c[0]), float(c[1])
         arrow_ang = HEADING_ANG[sim.robot.heading]
         prev_phase = sim.phase
         auto = True
         acc = 0.0
+
+    def _arm_tournament():
+        """(Re)start the tournament: the current race runs first, the rest of
+        the menu-selected algorithms queue up on the SAME maze automatically."""
+        nonlocal tourney_queue, tourney_results, tourney_prompt, tourney_total
+        names = [a for a in (cfg.get("algos") or [cfg.get("algo", "flood")])
+                 if a in ALGOS] or ["flood"]
+        cur = sim.algorithm if sim.algorithm in names else names[0]
+        tourney_queue = [a for a in names if a != cur]
+        tourney_results = []
+        tourney_prompt = False
+        tourney_total = len(names)
+
+    def _cancel_tournament():
+        nonlocal tourney_queue, tourney_results, tourney_prompt, tourney_total
+        tourney_queue = []
+        tourney_results = []
+        tourney_prompt = False
+        tourney_total = 1
+
+    def _true_optimum():
+        from astar import find_path
+        p = find_path(sim.true, sim.start, sim.goals)
+        return max(0, len(p) - 1)
+
+    def _switch_to(new_algo):
+        """Load an algorithm on the same maze with switch animation. Shared by
+        manual loads and the automatic tournament advance."""
+        nonlocal show_compare, switch_until, switch_label, switch_color
+        changed = (new_algo != sim.algorithm)
+        sim.set_algorithm(new_algo)
+        show_compare = False
+        compare_rows.clear()
+        _after_fresh_start()
+        if changed:
+            # algo-switch animation: banner + halo in the new algo's color
+            switch_label = ALGOS[new_algo].label
+            switch_color = ALGOS[new_algo].color
+            switch_until = pygame.time.get_ticks() + 2500
+
+    def _on_race_end():
+        """Called once when a race reaches DONE: log it, then either advance
+        the tournament or prompt for the stats page."""
+        nonlocal race_recorded, tourney_prompt
+        if race_recorded:
+            return
+        race_recorded = True
+        tourney_results.append({
+            "algo": sim.algorithm,
+            "label": ALGOS[sim.algorithm].label,
+            "to_goal": sim.steps_to_goal,
+            "walk": sim.flood_len if sim.flood_len else sim.steps,
+            "optimal": _true_optimum(),
+            "solve_time": sim.last_solve_time or 0.0,
+            "stuck": sim.stuck,
+            "explored": len(sim.explored),
+            "finished": True,
+        })
+        if tourney_queue:
+            _switch_to(tourney_queue.pop(0))
+        elif len(tourney_results) >= 2:
+            tourney_prompt = True  # tournament complete -> offer the stats page
 
     def do_reset():
         nonlocal W, H, total_cells, show_compare
@@ -504,6 +578,7 @@ def run_main(screen, clock, fonts, sim, cfg):
         show_compare = False
         compare_rows.clear()
         _after_fresh_start()
+        _arm_tournament()
 
     def do_replay():
         """Replay the SAME maze with the SAME algorithm (X deals a fresh one)."""
@@ -511,6 +586,7 @@ def run_main(screen, clock, fonts, sim, cfg):
         sim.set_algorithm(sim.algorithm)
         show_compare = False
         compare_rows.clear()
+        _cancel_tournament()  # manual replay steps outside the tournament
         _after_fresh_start()
 
     def do_compare():
@@ -520,13 +596,43 @@ def run_main(screen, clock, fonts, sim, cfg):
         if sim.phase not in ("OPTIMIZE", "DONE"):
             return
         if not show_compare and not sim.compare_results:
-            from simulator import Simulator
-            names = list(cfg.get("algos") or [])
-            if len(names) < 2:
-                names = list(ALGO_ORDER)
-            sim.compare_results = [Simulator(sim.true, algorithm=n).run_to_completion(n)
-                                   for n in names]
+            _race_compare()
         show_compare = not show_compare
+
+    def _race_compare():
+        """Fill sim.compare_results by racing each selected algorithm."""
+        from simulator import Simulator
+        names = list(cfg.get("algos") or [])
+        if len(names) < 2:
+            names = list(ALGO_ORDER)
+        sim.compare_results = [Simulator(sim.true, algorithm=n).run_to_completion(n)
+                               for n in names]
+
+    def stats_rows():
+        """Rows for the stats page: tournament log first, else compare table."""
+        return tourney_results or sim.compare_results
+
+    def toggle_stats():
+        """Open/close the visual stats page (H). Opens the compare table's
+        data if needed so H always shows something after a solve."""
+        nonlocal stats_open, tourney_prompt
+        if stats_open:
+            stats_open = False
+            return
+        if not stats_rows() and sim.phase in ("OPTIMIZE", "DONE"):
+            _race_compare()
+        if stats_rows():
+            stats_open = True
+            tourney_prompt = False
+
+    def _open_stats_from_prompt():
+        nonlocal stats_open, tourney_prompt
+        stats_open = True
+        tourney_prompt = False
+
+    def _dismiss_prompt():
+        nonlocal tourney_prompt
+        tourney_prompt = False
 
     def do_load(i):
         """Load comparison row i: same maze, that algorithm, auto-run it."""
@@ -538,6 +644,7 @@ def run_main(screen, clock, fonts, sim, cfg):
         sim.set_algorithm(new_algo)
         show_compare = False
         compare_rows.clear()
+        _cancel_tournament()  # manual load steps outside the tournament
         _after_fresh_start()
         if changed:
             # algo-switch animation: banner + halo in the new algo's color
@@ -577,6 +684,7 @@ def run_main(screen, clock, fonts, sim, cfg):
     relayout()
     run_btn, step_btn = buttons[0], buttons[1]
     last_size = screen.get_size()
+    _arm_tournament()  # queue the menu-selected algos behind the opening race
 
     while running:
         dt = clock.tick(60) / 1000.0
@@ -597,7 +705,12 @@ def run_main(screen, clock, fonts, sim, cfg):
             if e.type == pygame.QUIT:
                 running = False
             elif e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
-                if show_compare and any(r.collidepoint(e.pos) for r in compare_rows):
+                if any(r.collidepoint(e.pos) for r, _ in overlay_btns):
+                    for r, fn in overlay_btns:
+                        if r.collidepoint(e.pos):
+                            fn()
+                            break
+                elif show_compare and any(r.collidepoint(e.pos) for r in compare_rows):
                     for i, r in enumerate(compare_rows):
                         if r.collidepoint(e.pos):
                             do_load(i)
@@ -613,7 +726,12 @@ def run_main(screen, clock, fonts, sim, cfg):
                                 break
             elif e.type == pygame.KEYDOWN:
                 if e.key == pygame.K_ESCAPE:
-                    running = False
+                    if stats_open:
+                        stats_open = False  # ESC backs out of overlays first
+                    elif show_compare:
+                        show_compare = False
+                    else:
+                        running = False
                 elif e.key == pygame.K_SPACE:
                     do_step()
                 elif e.key == pygame.K_r:
@@ -627,7 +745,12 @@ def run_main(screen, clock, fonts, sim, cfg):
                 elif e.key == pygame.K_y:
                     do_replay()
                 elif e.key == pygame.K_c:
-                    do_compare()
+                    if stats_open:
+                        stats_open = False
+                    else:
+                        do_compare()
+                elif e.key == pygame.K_h:
+                    toggle_stats()
                 elif e.key in (pygame.K_1, pygame.K_2, pygame.K_3) and show_compare:
                     do_load(e.key - pygame.K_1)
                 elif e.key == pygame.K_b:
@@ -654,7 +777,15 @@ def run_main(screen, clock, fonts, sim, cfg):
         step_btn.label = "Step (Spc)"
         if sim.phase == "OPTIMIZE" and prev_phase != "OPTIMIZE":
             flash_until = now + 4000
+        if sim.phase == "DONE" and prev_phase != "DONE":
+            _on_race_end()  # log race; advance tournament or prompt stats
         prev_phase = sim.phase
+        if auto and sim.phase == "OPTIMIZE" and sim.optimal_path:
+            # Sprint auto-plays the moment the shortest route exists. This
+            # frame-level catch also handles S-skipped races, which jump
+            # straight past the exploring phases the step loop watches.
+            sim.start_speedrun()
+            acc = 0.0
         if auto:
             eff = min(30.0, max(speed * 2.0, 12.0)) if sim.phase == "SPEEDRUN" else speed
             interval = 1.0 / eff
@@ -670,7 +801,10 @@ def run_main(screen, clock, fonts, sim, cfg):
                     advance()
                     if sim.phase == "OPTIMIZE":
                         acc = 0.0
-                        break
+                        if auto:
+                            sim.start_speedrun()  # sprint automatically
+                        else:
+                            break  # paused: wait for T
                 else:
                     acc = 0.0
                     break
@@ -855,6 +989,19 @@ def run_main(screen, clock, fonts, sim, cfg):
             grid_banner("SHORTEST PATH FOUND", "press T (or Speed Run) to sprint it",
                         (40, 150, 80))
 
+        # race stopwatch (bottom-right of the grid; freezes at the solve)
+        if sim.last_solve_time is not None and sim.phase in ("OPTIMIZE", "DONE",
+                                                             "SPEEDRUN"):
+            t_show = sim.last_solve_time
+        else:
+            t_show = _time.perf_counter() - sim.race_t0
+        sw = font.render("RACE %.1fs" % t_show, True, T["text"])
+        swr = pygame.Rect(ox + grid - sw.get_width() - 26, oy + grid - 42,
+                          sw.get_width() + 16, 30)
+        pygame.draw.rect(screen, T["panel"], swr, border_radius=6)
+        pygame.draw.rect(screen, T["div"], swr, 1, border_radius=6)
+        screen.blit(sw, (swr.x + 8, swr.y + 7))
+
         # ---- comparison overlay (same maze, every selected algorithm) ----
         compare_rows.clear()
         if show_compare and sim.compare_results:
@@ -891,6 +1038,94 @@ def run_main(screen, clock, fonts, sim, cfg):
                                 True, T["muted"])
             screen.blit(hint, hint.get_rect(center=(rect.centerx, rect.bottom - 12)))
 
+        # ---- stats page: visual bar-graph comparison (H) ----
+        overlay_btns.clear()
+        if stats_open and stats_rows():
+            srows = stats_rows()
+            tw = min(660, grid - 16)
+            chart_h = 100
+            th = 76 + 3 * chart_h + 30
+            rect = pygame.Rect(ox + (grid - tw) // 2,
+                               oy + max(8, (grid - th) // 2), tw, th)
+            pygame.draw.rect(screen, (8, 8, 12), rect.inflate(8, 8), border_radius=12)
+            pygame.draw.rect(screen, T["panel"], rect, border_radius=10)
+            pygame.draw.rect(screen, path_col, rect, 2, border_radius=10)
+            title = font.render("TOURNAMENT STATS — SAME MAZE", True, T["text"])
+            screen.blit(title, title.get_rect(center=(rect.centerx, rect.y + 20)))
+            sub = small.render("longer bar = slower · white tick = true optimum",
+                               True, T["muted"])
+            screen.blit(sub, sub.get_rect(center=(rect.centerx, rect.y + 40)))
+            close = pygame.Rect(rect.right - 108, rect.y + 10, 96, 26)
+            pygame.draw.rect(screen, T["btn"], close, border_radius=6)
+            pygame.draw.rect(screen, T["div"], close, 1, border_radius=6)
+            img = small.render("CLOSE (H)", True, T["text"])
+            screen.blit(img, img.get_rect(center=close.center))
+            overlay_btns.append((close, toggle_stats))
+            charts = (("Steps to first goal", "to_goal", False),
+                      ("Full walk (explore + return)", "walk", True),
+                      ("Solve time (seconds)", "solve_time", False))
+            for ci, (clabel, ckey, with_opt) in enumerate(charts):
+                cy0 = rect.y + 62 + ci * chart_h
+                screen.blit(font.render(clabel, True, T["muted"]),
+                            (rect.x + 16, cy0))
+                vals = []
+                for r in srows:
+                    v = r[ckey]
+                    if v is None:  # stuck with no goal time: rank by full walk
+                        v = r["walk"]
+                    vals.append(v)
+                vmax = max(vals + [1e-9])
+                opt = srows[0]["optimal"]
+                for i, r in enumerate(srows):
+                    by = cy0 + 22 + i * 22
+                    lab = small.render(r["label"][:12], True, T["text"])
+                    screen.blit(lab, (rect.x + 16, by))
+                    bx = rect.x + 130
+                    bw_max = tw - 130 - 110
+                    w = int(bw_max * vals[i] / vmax) if vmax > 0 else 0
+                    bar = pygame.Rect(bx, by + 1, max(4, w), 13)
+                    col = BACKTRACK_RED if (r["stuck"] and ckey == "to_goal") \
+                        else ALGOS[r["algo"]].color
+                    pygame.draw.rect(screen, col, bar, border_radius=3)
+                    if with_opt and opt > 0:
+                        oxp = bx + int(bw_max * opt / vmax)
+                        pygame.draw.line(screen, WHITE, (oxp, by - 2),
+                                         (oxp, by + 16), 2)
+                    if ckey == "solve_time":
+                        vtxt = "%.2fs" % vals[i]
+                    else:
+                        vtxt = "%d%s" % (vals[i], " STUCK" if r["stuck"] and
+                                         ckey == "to_goal" else "")
+                    screen.blit(small.render(vtxt, True, T["text"]),
+                                (bx + bw_max + 8, by))
+            foot = small.render("H closes · every bar raced on this exact maze",
+                                True, T["muted"])
+            screen.blit(foot, foot.get_rect(center=(rect.centerx, rect.bottom - 12)))
+
+        # ---- tournament-complete prompt (View stats / Dismiss) ----
+        if tourney_prompt and not stats_open:
+            pw = 440
+            pr = pygame.Rect(ox + (grid - pw) // 2, oy + grid - 120, pw, 78)
+            pygame.draw.rect(screen, (8, 8, 12), pr.inflate(6, 6), border_radius=12)
+            pygame.draw.rect(screen, T["panel"], pr, border_radius=10)
+            pygame.draw.rect(screen, (40, 160, 80), pr, 2, border_radius=10)
+            msg = font.render("TOURNAMENT COMPLETE — %d algos raced" % len(tourney_results),
+                              True, T["text"])
+            screen.blit(msg, msg.get_rect(center=(pr.centerx, pr.y + 20)))
+            b1 = pygame.Rect(pr.x + 16, pr.y + 38, (pw - 48) // 2, 28)
+            b2 = pygame.Rect(pr.x + 32 + (pw - 48) // 2, pr.y + 38, (pw - 48) // 2, 28)
+            for br, txt, acc, fn in ((b1, "View stats (H)", True, _open_stats_from_prompt),
+                                     (b2, "Dismiss", False, _dismiss_prompt)):
+                hov = br.collidepoint(mouse)
+                col = BTN_ACC if acc else (T["btn_hov"] if hov else T["btn"])
+                if acc and hov:
+                    col = (70, 135, 235)
+                pygame.draw.rect(screen, col, br, border_radius=6)
+                pygame.draw.rect(screen, T["div"], br, 1, border_radius=6)
+                img = small.render(txt, True, WHITE if acc else T["text"])
+                screen.blit(img, img.get_rect(center=br.center))
+                overlay_btns.append((br, fn))
+
         # ---- sidebar ----
         screen.blit(big.render("MARC Micromouse", True, T["text"]), (px, oy + 12))
         screen.blit(small.render("%s explorer + A*  ·  %dx%d" % (
@@ -900,7 +1135,9 @@ def run_main(screen, clock, fonts, sim, cfg):
         pygame.draw.rect(screen, pcol, badge, border_radius=6)
         img = font.render(
             f"{'● RUNNING' if auto and exploring() or sprinting and auto else '○ PAUSED'}"
-            f"  |  {sim.phase}{' · STUCK' if sim.stuck else ''}", True, WHITE)
+            f"  |  {sim.phase}{' · STUCK' if sim.stuck else ''}"
+            + (f" · RACE {min(len(tourney_results) + 1, tourney_total)}/{tourney_total}"
+               if tourney_total > 1 else ""), True, WHITE)
         screen.blit(img, img.get_rect(center=badge.center))
 
         stats = [

@@ -10,8 +10,8 @@
 starts in a maze it has never seen, maps it with a flood-fill algorithm, drives
 back to the start, then computes the shortest route with A* and sprints it. The
 whole point the demo proves: exploring an unknown maze costs far more steps
-than running the optimal path once you know it — e.g. 84 exploration steps vs a
-14-step optimal sprint on the same board."
+than running the optimal path once you know it — e.g. 46 exploration steps vs a
+21-step optimal sprint on the same board (seed 11)."
 
 ## 2. Problem statement
 
@@ -40,7 +40,7 @@ about **algorithms**, not physics.
 main.py                CLI: --headless / --2d / --3d, --size, --seed, --maze, --algo
 maze.py                wall data (shared-edge arrays), goals, coordinates
 robot.py               position + heading only
-algos.py               explorer strategies: flood-fill, Tremaux DFS, wall follower
+algos.py               explorer strategies: flood-fill, Dijkstra, Tremaux DFS
 floodfill.py           BFS distances + flood step choice (used by flood explorer)
 astar.py               Phase 2: A* with Manhattan heuristic
 simulator.py           simulation loop + phase state machine (NO GUI imports)
@@ -115,34 +115,37 @@ gap grows with maze size — that gap IS the cost of not having a map."
 | Explorer | To goal | Full walk | Optimum | Solve time | Verdict |
 |----------|---------|-----------|---------|------------|---------|
 | Flood-fill | 25 | 46 | 21 | ~0.03s | solved, near-optimal |
-| Tremaux DFS | 153 | 174 | 21 | ~0.12s | solved, 6x the cost |
-| Left-wall follower | — | 817 then STUCK | 21 | ~0.5s | loops forever on loopy mazes |
+| Dijkstra | 131 | 152 | 21 | ~0.13s | solved; optimal character, costlier search |
+| Tremaux DFS | 153 | 174 | 21 | ~0.11s | solved, 6x the cost |
 
-(Solve times are wall-clock on a laptop, PyPy-speed dependent — the step
-counts are the architecture-independent result; times just show all three
-finish instantly.) Loading a different row flashes an ALGORITHM SWITCHED
-banner plus a halo in that explorer's color, so the audience always knows
-which brain is driving.
+(On seed 7 flood and Dijkstra tie exactly at 23/56 — the twin result that
+proves the point.) Solve times are wall-clock on a laptop — step counts are
+the architecture-independent result; times just show all three finish
+instantly. Loading a different row flashes an ALGORITHM SWITCHED banner plus
+a halo in that explorer's color, so the audience always knows which brain is
+driving.
 
-Takeaway line: "Three algorithms, one maze: flood-fill wins, DFS pays 6x for
-no map, and wall following provably fails where loops exist — which is why
-flood fill is the competition standard." Replay any row with keys 1–3; Replay
-(Y) re-runs the same maze, New maze (X) deals a fresh one.
+Takeaway line: "Three algorithms, one maze: flood-fill wins on steps,
+Dijkstra matches it on optimality at higher search cost, DFS pays 6x for
+having no map." Replay any row with keys 1–3; Replay (Y) re-runs the same
+maze, New maze (X) deals a fresh one.
 
 ## 8. Live demo script (5–7 minutes)
 
 1. (30s) Double-click `start.bat`. Start menu appears: pick 16x16, Random,
-   leave seed empty, toggle all three algorithms (F/T/W). Say what each means.
-2. (2 min) Press START. Point out: ghost maze (ground truth, grey), black walls
-   appearing as discovered, distance numbers + warm/cool gradient, blue trail,
-   **red dots = revisits/wasted motion**, gold flashes = newly sensed walls.
-3. (30s) Let it reach the goal, watch it drive home. Note the phase badge.
-4. (30s) "SHORTEST PATH FOUND" banner → press T. Orange sprint mouse, 2x speed,
-   red SPEEDRUN banner and vignette. Contrast sprint length vs exploration.
-5. (1 min) Press C: the shootout table races flood/DFS/wall-follower on the
-   identical maze. Read the to-goal column aloud; press 2 to watch DFS redo
-   the same maze slowly. This is the strongest 60 seconds of the demo.
-6. (1 min) Close with limitations + one future-work item (Section 10).
+   leave seed empty, toggle flood + Dijkstra (F/I). Say what each means:
+   goal-anchored flood vs mouse-anchored Dijkstra.
+2. (2 min) Press START. Flood races first with no further input: ghost maze,
+   black discovered walls, numbers + gradient, blue trail, red revisit dots,
+   gold sense-flashes, live stopwatch bottom-right. When it solves, the sprint
+   auto-plays — then the tournament auto-loads Dijkstra with an ALGORITHM
+   SWITCHED banner and runs it on the identical maze.
+3. (30s) When race 2 finishes, the TOURNAMENT COMPLETE prompt appears — open
+   the stats page (H): bar graphs of to-goal, walk and time with the optimum
+   ticked. Read the twin result aloud.
+4. (1 min) Press C for the table, replay a row with 1–2, or X for a fresh
+   maze. Optional: dark mode (D), 32x32 board.
+5. (1 min) Close with limitations + one future-work item (Section 10).
 
 ## 9. Likely viva/Q&A questions (with answers)
 
@@ -163,9 +166,9 @@ flood fill is the competition standard." Replay any row with keys 1–3; Replay
    reversal-last tie-break (see `floodfill.choose_next`).
 7. *What happens on Quit/ESC vs Menu (B)?* ESC closes the app; B returns to the
    start menu, discarding the current race.
-8. *How is this different from a real Micromouse?* No sensors, motors, inertia,
-   or wall-following; sensing is perfect on entry; movement is discrete. The
-   sim isolates decision-making from hardware.
+8. *How is this different from a real Micromouse?* No sensors, motors or
+    inertia; sensing is perfect on entry; movement is discrete. The
+    sim isolates decision-making from hardware.
 9. *Biggest simplification?* Discovering a whole cell's walls on entry and
    teleport-style discrete motion.
 10. *How did you test without the GUI?* `--headless` asserts goal-reached,
@@ -177,14 +180,16 @@ flood fill is the competition standard." Replay any row with keys 1–3; Replay
 13. *Who did what?* (Fill in per teammate before presenting.)
 14. *Why Python/Pygame?* Zero-install friction for the team, fast iteration,
     readable for beginners; performance is a non-issue at this scale.
-15. *Why does wall following fail while DFS succeeds?* Wall following is a
-    local rule with no memory — on any loop it orbits forever (the sim's
-    stuck detector fires after the same pose repeats). DFS carries a stack,
-    i.e. memory of how it got in, so it can always back out. Memory is the
-    difference between a heuristic and an algorithm.
+15. *Why do flood-fill and Dijkstra finish so similarly?* Both are optimal
+    greedy strategies on the known map — one propagates distances from the
+    goal, the other searches from the mouse. Same finish, different search
+    direction and tie-breaks; on seed 7 they tie exactly, on seed 11 the
+    tie-breaks cost Dijkstra ~100 extra steps. That is the demo's subtle
+    result: optimality of the *path* doesn't imply equality of the *search*.
 16. *Is the comparison fair — same maze for all three?* Yes, that is the
-    point of Compare (C): fresh Simulator instances share one immutable true
-    maze, so to-goal steps are directly comparable and the optimum is shared.
+    point of Compare (C) and the tournament: fresh Simulator instances share
+    one immutable true maze, so to-goal steps are directly comparable and
+    the optimum is shared.
 
 ## 10. Limitations & future work (say these before the examiner does)
 
@@ -202,12 +207,18 @@ seed sweeps and a results table, then a hardware abstraction layer.
 - Speed run: replaying the A* optimum at 2x for the demo finale.
 - Seed: integer reproducing an exact random maze (`--seed 7`).
 - Ghost maze: faint full-layout preview; black = confirmed by visit.
+- Believed vs true optimum: the green sprint path and sidebar figure use the
+  mapped-so-far maze (they may cut through still-unknown territory, e.g. 14
+  believed vs 21 true on seed 11) — that is what the mouse itself would run.
+  Shootout tables always use the ground-truth optimum as the shared yardstick.
 
 ## 12. Code pointers (for "show me where…" questions)
 
 - Flood BFS: `floodfill.compute_distances` · step choice: `floodfill.choose_next`
-- Explorers: `algos.FloodExplorer/DfsExplorer/WallExplorer.select` · stuck guard:
-  `simulator._note_cycle` · same-maze replay: `simulator.set_algorithm`
+- Explorers: `algos.FloodExplorer/DijkstraExplorer/DfsExplorer.select` ·
+  stuck guard: `simulator._note_cycle` · same-maze replay:
+  `simulator.set_algorithm` · tournament: `view_2d._on_race_end`,
+  stats page: `view_2d.toggle_stats`
 - Bump + phases: `simulator.Simulator.step` · A*: `astar.find_path`, `manhattan`
 - Headless races: `simulator.run_to_completion` · compare table: `view_2d.do_compare`
 - Speed-run state: `simulator.start_speedrun/step_speedrun` · maze gen:
