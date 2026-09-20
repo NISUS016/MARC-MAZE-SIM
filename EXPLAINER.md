@@ -37,10 +37,11 @@ about **algorithms**, not physics.
 ## 4. Architecture (single codebase, two views)
 
 ```
-main.py                CLI: --headless / --2d / --3d, --size, --seed, --maze
+main.py                CLI: --headless / --2d / --3d, --size, --seed, --maze, --algo
 maze.py                wall data (shared-edge arrays), goals, coordinates
 robot.py               position + heading only
-floodfill.py           Phase 1: BFS distances + next-step choice
+algos.py               explorer strategies: flood-fill, Tremaux DFS, wall follower
+floodfill.py           BFS distances + flood step choice (used by flood explorer)
 astar.py               Phase 2: A* with Manhattan heuristic
 simulator.py           simulation loop + phase state machine (NO GUI imports)
 view_2d.py             Pygame: start menu, sidebar, animations, dark mode
@@ -109,18 +110,32 @@ and to drive the speed-run replay.
 Takeaway line: "Exploration consistently costs 2–7x the optimal path, and the
 gap grows with maze size — that gap IS the cost of not having a map."
 
+## 7b. Same-maze algorithm shootout (seed 11, 16x16 — via Compare (C))
+
+| Explorer | To goal | Full walk | Optimum | Verdict |
+|----------|---------|-----------|---------|---------|
+| Flood-fill | 25 | 46 | 21 | solved, near-optimal |
+| Tremaux DFS | 153 | 174 | 21 | solved, 6x the cost |
+| Left-wall follower | — | 817 then STUCK | 21 | loops forever on loopy mazes |
+
+Takeaway line: "Three algorithms, one maze: flood-fill wins, DFS pays 6x for
+no map, and wall following provably fails where loops exist — which is why
+flood fill is the competition standard." Replay any row with keys 1–3; Replay
+(Y) re-runs the same maze, New maze (X) deals a fresh one.
+
 ## 8. Live demo script (5–7 minutes)
 
 1. (30s) Double-click `start.bat`. Start menu appears: pick 16x16, Random,
-   leave seed empty. Say what each option means.
+   leave seed empty, toggle all three algorithms (F/T/W). Say what each means.
 2. (2 min) Press START. Point out: ghost maze (ground truth, grey), black walls
    appearing as discovered, distance numbers + warm/cool gradient, blue trail,
    **red dots = revisits/wasted motion**, gold flashes = newly sensed walls.
 3. (30s) Let it reach the goal, watch it drive home. Note the phase badge.
 4. (30s) "SHORTEST PATH FOUND" banner → press T. Orange sprint mouse, 2x speed,
    red SPEEDRUN banner and vignette. Contrast sprint length vs exploration.
-5. (1 min) Open FLOOD KEY + TRAIL KEY in the sidebar; read flood-walk vs A*
-   numbers aloud. Optional: toggle dark mode (D), try a 32x32 board.
+5. (1 min) Press C: the shootout table races flood/DFS/wall-follower on the
+   identical maze. Read the to-goal column aloud; press 2 to watch DFS redo
+   the same maze slowly. This is the strongest 60 seconds of the demo.
 6. (1 min) Close with limitations + one future-work item (Section 10).
 
 ## 9. Likely viva/Q&A questions (with answers)
@@ -156,6 +171,14 @@ gap grows with maze size — that gap IS the cost of not having a map."
 13. *Who did what?* (Fill in per teammate before presenting.)
 14. *Why Python/Pygame?* Zero-install friction for the team, fast iteration,
     readable for beginners; performance is a non-issue at this scale.
+15. *Why does wall following fail while DFS succeeds?* Wall following is a
+    local rule with no memory — on any loop it orbits forever (the sim's
+    stuck detector fires after the same pose repeats). DFS carries a stack,
+    i.e. memory of how it got in, so it can always back out. Memory is the
+    difference between a heuristic and an algorithm.
+16. *Is the comparison fair — same maze for all three?* Yes, that is the
+    point of Compare (C): fresh Simulator instances share one immutable true
+    maze, so to-goal steps are directly comparable and the optimum is shared.
 
 ## 10. Limitations & future work (say these before the examiner does)
 
@@ -177,6 +200,9 @@ seed sweeps and a results table, then a hardware abstraction layer.
 ## 12. Code pointers (for "show me where…" questions)
 
 - Flood BFS: `floodfill.compute_distances` · step choice: `floodfill.choose_next`
+- Explorers: `algos.FloodExplorer/DfsExplorer/WallExplorer.select` · stuck guard:
+  `simulator._note_cycle` · same-maze replay: `simulator.set_algorithm`
 - Bump + phases: `simulator.Simulator.step` · A*: `astar.find_path`, `manhattan`
+- Headless races: `simulator.run_to_completion` · compare table: `view_2d.do_compare`
 - Speed-run state: `simulator.start_speedrun/step_speedrun` · maze gen:
   `mazes/random_maze.generate_random_maze` · menu loop: `view_2d.run_2d`

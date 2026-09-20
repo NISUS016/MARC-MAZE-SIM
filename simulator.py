@@ -3,6 +3,7 @@
 Both 2D and 3D views call Simulator.step(). Keeps algorithm testable headless.
 Phases: EXPLORE_TO_GOAL -> RETURN_TO_START -> OPTIMIZE (A*) -> DONE.
 """
+from algos import ALGOS
 from astar import find_path
 from floodfill import choose_next, compute_distances
 from maze import START, center_goals
@@ -10,19 +11,35 @@ from robot import Robot
 
 
 class Simulator:
-    def __init__(self, true_maze, start=START, goals=None):
+    def __init__(self, true_maze, start=START, goals=None, algorithm="flood"):
+        if algorithm not in ALGOS:
+            raise ValueError(f"unknown algorithm {algorithm!r}; pick {sorted(ALGOS)}")
         self.true = true_maze
         self.start = start
         # goals default to the center 4 cells of whatever size maze this is
         self.goals = set(goals) if goals else set(center_goals(true_maze.w, true_maze.h))
-        self.reset()
+        self.algorithm = algorithm
+        self.compare_results = []  # compare feature; cleared only on new maze
+        self._reset_run()
 
-    def reset(self, new_maze=None):
-        """Restart exploration. Pass a new maze to race a fresh random layout."""
-        from robot import Robot  # local import: keeps module import order simple
-
+    def reset(self, new_maze=None, algorithm=None):
+        """Restart exploration. A new maze replaces the board (and results);
+        otherwise the SAME maze is replayed (used for algo comparison)."""
         if new_maze is not None:
             self.true = new_maze
+            self.compare_results = []
+        if algorithm is not None:
+            if algorithm not in ALGOS:
+                raise ValueError(f"unknown algorithm {algorithm!r}")
+            self.algorithm = algorithm
+        self._reset_run()
+
+    def set_algorithm(self, name):
+        """Replay the SAME maze with a different explorer (comparison runs)."""
+        self.reset(algorithm=name)
+
+    def _reset_run(self):
+        from robot import Robot  # local import: keeps module import order simple
 
         self.known = self.true.blank_copy()  # fog of war: borders only
         self.robot = Robot(*self.start)
@@ -32,6 +49,9 @@ class Simulator:
         self.explore_path = []  # full walk incl. detours
         self.optimal_path = []  # A* output
         self.flood_len = 0
+        self.algo_state = {}  # per-explorer memory (DFS stack, cycle counts)
+        self.stuck = False  # True if the explorer looped / gave up
+        self.steps_to_goal = None  # steps at first goal arrival (None if stuck)
         # Speed-run animation state (replays optimal_path after OPTIMIZE).
         self.speedrun_active = False
         self.speedrun_idx = 0
@@ -63,19 +83,34 @@ class Simulator:
         x, y = self.robot.pos
         if (x, y) in self._target():
             if self.phase == "EXPLORE_TO_GOAL":
+                if self.steps_to_goal is None:
+                    self.steps_to_goal = self.steps  # first arrival metric
                 self.phase = "RETURN_TO_START"
                 self.dist = compute_distances(self.known, {self.start})
                 return self.phase
             if self.phase == "RETURN_TO_START":
                 self._run_optimization()
                 return self.phase
-        nxt = choose_next(x, y, self.dist, self.known, self.robot.heading)
-        if nxt is None:  # trapped on incomplete map: force re-propagate optimism
-            self.dist = compute_distances(self.known, self._target())
-            nxt = choose_next(x, y, self.dist, self.known, self.robot.heading)
-            if nxt is None:
-                self._run_optimization()  # give up exploring, show best known
+        if self.phase == "EXPLORE_TO_GOAL":
+            # Movement choice belongs to the active explorer. The return leg
+            # always uses flood guidance on the mapped-so-far maze.
+            if self._note_cycle():  # looping without progress (wall follower)?
+                self.stuck = True
+                self._run_optimization()
                 return self.phase
+            nxt = ALGOS[self.algorithm].select(self)
+            if nxt is None:  # fully explored yet goaless (shouldn't happen)
+                self.stuck = True
+                self._run_optimization()
+                return self.phase
+        else:
+            nxt = choose_next(x, y, self.dist, self.known, self.robot.heading)
+            if nxt is None:  # trapped on incomplete map: re-propagate optimism
+                self.dist = compute_distances(self.known, self._target())
+                nxt = choose_next(x, y, self.dist, self.known, self.robot.heading)
+                if nxt is None:
+                    self._run_optimization()  # give up exploring, show best known
+                    return self.phase
         # Realism guard: known map is optimistic, true maze may have a wall
         # here. Bump (learn it, stay put) instead of ghosting through it.
         # Without this the mouse walks through undiscovered walls.
@@ -97,6 +132,43 @@ class Simulator:
         self.steps += 1
         self._discover()
         return self.phase
+
+    def _note_cycle(self):
+        """Loop guard for exploration. True when the explorer repeats the
+        same (cell, heading) state over and over (wall follower in a loop)
+        or blows past any reasonable step budget."""
+        key = (self.robot.x, self.robot.y, self.robot.heading)
+        counts = self.algo_state.setdefault("cycles", {})
+        counts[key] = counts.get(key, 0) + 1
+        if counts[key] > 8:
+            return True
+        if self.steps > 8 * self.true.w * self.true.h + 1000:
+            return True
+        return False
+
+    def run_to_completion(self, name, cap=40000):
+        """Race one algorithm headlessly on the CURRENT maze. The maze is
+        kept; exploration state is reset. Returns a metrics dict for the
+        comparison table."""
+        self.set_algorithm(name)
+        n = 0
+        while self.phase not in ("OPTIMIZE", "DONE") and n < cap:
+            self.step()
+            n += 1
+        # Reference optimum always comes from ground truth so every row of
+        # the comparison table shares one yardstick (a stuck run only maps
+        # part of the maze, so its known-map A* would under-read).
+        true_path = find_path(self.true, self.start, self.goals)
+        return {
+            "algo": name,
+            "label": ALGOS[name].label,
+            "to_goal": self.steps_to_goal,
+            "walk": self.flood_len if self.flood_len else self.steps,
+            "optimal": max(0, len(true_path) - 1),
+            "stuck": self.stuck,
+            "explored": len(self.explored),
+            "finished": self.phase in ("OPTIMIZE", "DONE"),
+        }
 
     def _run_optimization(self):
         """Phase 2: A* on the now-complete known map (§12)."""

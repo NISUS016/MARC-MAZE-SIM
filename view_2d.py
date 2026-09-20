@@ -9,6 +9,7 @@ N/G/E/P/M/D toggles, +/- speed, ESC quit.
 import math
 import pygame
 
+from algos import ALGOS, ALGO_ORDER
 from collections import deque
 from floodfill import INF
 
@@ -81,6 +82,8 @@ def _maximize_window():
 
 
 class Button:
+    algo_key = ""  # optional tag (start-menu algorithm buttons use it)
+
     def __init__(self, rect, label, action, enabled_fn=None, accent=False):
         self.rect = pygame.Rect(rect)
         self.label = label
@@ -122,16 +125,22 @@ class Button:
 # Start menu: maze size 16..32, random/classic, seed box, dark mode.
 # --------------------------------------------------------------------------
 def show_menu(screen, clock, fonts, defaults):
+    from algos import ALGOS, ALGO_ORDER
+
     font, small, big, banner = fonts
     size = defaults.get("size", 16)
     maze_kind = defaults.get("maze_kind", "random")
     seed_txt = "" if defaults.get("seed") is None else str(defaults["seed"])
     dark = defaults.get("dark", False)
     seed_focus = False
+    picked = list(defaults.get("algos") or [defaults.get("algo", "flood")])
+    picked = [a for a in ALGO_ORDER if a in picked] or ["flood"]
 
     def cfg():
         seed = int(seed_txt) if seed_txt.isdigit() else None
-        return {"size": size, "maze_kind": maze_kind, "seed": seed, "dark": dark}
+        ordered = [a for a in ALGO_ORDER if a in picked]
+        return {"size": size, "maze_kind": maze_kind, "seed": seed, "dark": dark,
+                "algos": ordered, "algo": ordered[0]}
 
     size_btns = [Button((0, 0, 0, 0), str(s), lambda: None) for s in SIZES]
 
@@ -155,6 +164,22 @@ def show_menu(screen, clock, fonts, defaults):
         if k == "simple":
             size = 16
 
+    def _toggle_algo(key):
+        nonlocal picked
+        if key in picked:
+            if len(picked) > 1:  # always keep at least one algorithm
+                picked = [a for a in picked if a != key]
+        else:
+            picked = [a for a in ALGO_ORDER if a in (picked + [key])]
+
+    algo_btns = []
+    for _key in ALGO_ORDER:
+        _b = Button((0, 0, 0, 0), "%s (%s)" % (ALGOS[_key].label,
+                                               ALGOS[_key].menu_key),
+                    lambda _k=_key: _toggle_algo(_k))
+        _b.algo_key = _key
+        algo_btns.append(_b)
+
     dark_btn = Button((0, 0, 0, 0), "Dark: OFF", lambda: _toggle_dark())
 
     def _toggle_dark():
@@ -173,17 +198,20 @@ def show_menu(screen, clock, fonts, defaults):
         mouse = pygame.mouse.get_pos()
 
         # layout: centered card, buttons positioned every frame (cheap)
-        cw, ch = min(620, ww - 60), min(560, hh - 40)
+        cw, ch = min(620, ww - 60), min(620, hh - 40)
         cx, cy = (ww - cw) // 2, (hh - ch) // 2
         y = cy + 24
         for i, b in enumerate(size_btns):
             bw = (cw - 48 - 4 * 8) // 5
-            b.rect = pygame.Rect(cx + 24 + i * (bw + 8), y + 78, bw, 36)
-        type_btns[0].rect = pygame.Rect(cx + 24, y + 146, (cw - 48 - 8) // 2, 36)
-        type_btns[1].rect = pygame.Rect(cx + 24 + (cw - 48 - 8) // 2 + 8, y + 146,
-                                        (cw - 48 - 8) // 2, 36)
-        seed_box = pygame.Rect(cx + 24, y + 214, 220, 34)
-        dark_btn.rect = pygame.Rect(cx + 24 + 220 + 12, y + 214, cw - 48 - 232, 34)
+            b.rect = pygame.Rect(cx + 24 + i * (bw + 8), y + 76, bw, 34)
+        type_btns[0].rect = pygame.Rect(cx + 24, y + 138, (cw - 48 - 8) // 2, 34)
+        type_btns[1].rect = pygame.Rect(cx + 24 + (cw - 48 - 8) // 2 + 8, y + 138,
+                                        (cw - 48 - 8) // 2, 34)
+        for i, b in enumerate(algo_btns):
+            aw = (cw - 48 - 2 * 8) // 3
+            b.rect = pygame.Rect(cx + 24 + i * (aw + 8), y + 198, aw, 34)
+        seed_box = pygame.Rect(cx + 24, y + 258, 220, 32)
+        dark_btn.rect = pygame.Rect(cx + 24 + 220 + 12, y + 258, cw - 48 - 232, 32)
         start_btn.rect = pygame.Rect(cx + 24, cy + ch - 70, cw - 48, 44)
 
         for e in pygame.event.get():
@@ -194,7 +222,7 @@ def show_menu(screen, clock, fonts, defaults):
                     seed_focus = True
                 else:
                     seed_focus = False
-                    for b in size_btns + type_btns + [dark_btn]:
+                    for b in size_btns + type_btns + algo_btns + [dark_btn]:
                         if b.click(e.pos):
                             break
                     else:
@@ -213,6 +241,12 @@ def show_menu(screen, clock, fonts, defaults):
                     _set_kind("random")
                 elif e.key == pygame.K_c:
                     _set_kind("simple")
+                elif e.key == pygame.K_f and not seed_focus:
+                    _toggle_algo("flood")
+                elif e.key == pygame.K_t and not seed_focus:
+                    _toggle_algo("dfs")
+                elif e.key == pygame.K_w and not seed_focus:
+                    _toggle_algo("wall")
                 elif seed_focus and e.key == pygame.K_BACKSPACE:
                     seed_txt = seed_txt[:-1]
                 elif seed_focus and e.unicode.isdigit() and len(seed_txt) < 6:
@@ -228,18 +262,23 @@ def show_menu(screen, clock, fonts, defaults):
         screen.blit(banner.render("MARC Micromouse", True, T["text"]), (cx + 24, y))
         screen.blit(small.render("flood-fill explorer + A* optimizer  —  pick your race",
                                  True, T["muted"]), (cx + 24, y + 30))
-        screen.blit(font.render("MAZE SIZE  (keys 1-5)", True, T["muted"]), (cx + 24, y + 58))
+        screen.blit(font.render("MAZE SIZE  (keys 1-5)", True, T["muted"]), (cx + 24, y + 56))
         for b in size_btns:
             b.accent = (int(b.label) == size)
             b.draw(screen, small, mouse, T)
         screen.blit(font.render("MAZE TYPE  (R random / C classic)", True, T["muted"]),
-                    (cx + 24, y + 124))
+                    (cx + 24, y + 118))
         for b in type_btns:
             b.accent = ((b.label.startswith("Random") and maze_kind == "random") or
                         (b.label.startswith("Classic") and maze_kind == "simple"))
             b.draw(screen, small, mouse, T)
+        screen.blit(font.render("ALGORITHMS  (F/T/W — race first, compare rest later)",
+                                True, T["muted"]), (cx + 24, y + 178))
+        for b in algo_btns:
+            b.accent = (b.algo_key in picked)
+            b.draw(screen, small, mouse, T)
         screen.blit(font.render("SEED  (empty = fresh maze every race)", True, T["muted"]),
-                    (cx + 24, y + 192))
+                    (cx + 24, y + 238))
         pygame.draw.rect(screen, T["btn"], seed_box, border_radius=6)
         pygame.draw.rect(screen, BTN_ACC if seed_focus else T["div"], seed_box,
                          2 if seed_focus else 1, border_radius=6)
@@ -247,13 +286,13 @@ def show_menu(screen, clock, fonts, defaults):
         screen.blit(font.render(shown, True, T["text"] if seed_txt else T["muted"]),
                     (seed_box.x + 10, seed_box.y + 8))
         dark_btn.draw(screen, small, mouse, T)
-        screen.blit(font.render("HOW A RUN GOES", True, T["muted"]), (cx + 24, y + 262))
+        screen.blit(font.render("HOW A RUN GOES", True, T["muted"]), (cx + 24, y + 300))
         for j, (dot, txt) in enumerate((
-                ((220, 120, 40), "1 Explore — flood-fill learns walls cell by cell"),
-                ((150, 100, 220), "2 Return — same logic drives it back to start"),
+                ((220, 120, 40), "1 Explore — chosen algorithm learns walls cell by cell"),
+                ((150, 100, 220), "2 Return — flood logic drives it back to start"),
                 ((40, 160, 80), "3 Sprint — A* replays the shortest known route"))):
-            pygame.draw.circle(screen, dot, (cx + 30, y + 284 + j * 20), 5)
-            screen.blit(small.render(txt, True, T["text"]), (cx + 42, y + 278 + j * 20))
+            pygame.draw.circle(screen, dot, (cx + 30, y + 322 + j * 20), 5)
+            screen.blit(small.render(txt, True, T["text"]), (cx + 42, y + 316 + j * 20))
         screen.blit(small.render("SPACE step · R auto · T sprint · X new maze · D dark",
                                  True, T["muted"]), (cx + 24, cy + ch - 108))
         start_btn.draw(screen, font, mouse, T)
@@ -278,6 +317,8 @@ def run_main(screen, clock, fonts, sim, cfg):
     show_maze = True
     dark = cfg.get("dark", False)
     acc = 0.0
+    show_compare = False  # comparison table overlay (C after a solved race)
+    compare_rows = []  # clickable row rects, rebuilt every frame while open
 
     lay = {}  # ox/oy/px/cell/grid, recomputed when the window size changes
     last_size = None
@@ -311,9 +352,9 @@ def run_main(screen, clock, fonts, sim, cfg):
         cell = min(64, (hh - 60) // size, (ww - PANEL_W - 80) // size)
         cell = max(12, cell)
         grid = cell * size
-        # Sidebar content needs ~632px vertically; never let the panel end up
+        # Sidebar content needs ~666px vertically; never let the panel end up
         # shorter than its content (happens on small windows / big boards).
-        panel_h = max(grid, 632)
+        panel_h = max(grid, 666)
         ox = max(8, (ww - (grid + PANEL_W + 40)) // 2)
         oy = max(8, (hh - panel_h) // 2)
         lay.update(cell=cell, grid=grid, ox=ox, oy=oy, panel_h=panel_h)
@@ -328,13 +369,16 @@ def run_main(screen, clock, fonts, sim, cfg):
                    can_speedrun, accent=True),
             Button((px, oy + 308, bw, 28), "New maze (X)", do_reset),
             Button((px + bw + 8, oy + 308, bw, 28), "Menu (B)", do_menu),
-            Button((px, oy + 380, 70, 24), "- speed", lambda: None),
-            Button((px + 78, oy + 380, 70, 24), "+ speed", lambda: None),
+            Button((px, oy + 342, bw, 28), "Replay (Y)", do_replay),
+            Button((px + bw + 8, oy + 342, bw, 28), "Compare (C)", do_compare,
+                   can_compare, accent=True),
+            Button((px, oy + 414, 70, 24), "- speed", lambda: None),
+            Button((px + 78, oy + 414, 70, 24), "+ speed", lambda: None),
         ]
-        buttons[6].action = speed_down
-        buttons[7].action = speed_up
+        buttons[8].action = speed_down
+        buttons[9].action = speed_up
         toggle_rects[:] = [pygame.Rect(px + (i % 2) * ((PANEL_W - 16 + 8) // 2),
-                                       oy + 440 + (i // 2) * 26,
+                                       oy + 474 + (i // 2) * 26,
                                        (PANEL_W - 16 - 8) // 2, 22)
                            for i in range(6)]
         if start_c is None:
@@ -429,8 +473,23 @@ def run_main(screen, clock, fonts, sim, cfg):
         result = "menu"
         running = False
 
+    def can_compare():
+        return sim.phase in ("OPTIMIZE", "DONE")
+
+    def _after_fresh_start():
+        """Resync view animation with a freshly reset sim (replay/load/new)."""
+        nonlocal auto, acc, arrow_ang, prev_phase
+        trail.clear()
+        discover_walls.clear()
+        c = cell_rect(*sim.pos).center
+        anim_xy[0], anim_xy[1] = float(c[0]), float(c[1])
+        arrow_ang = HEADING_ANG[sim.robot.heading]
+        prev_phase = sim.phase
+        auto = True
+        acc = 0.0
+
     def do_reset():
-        nonlocal auto, acc, arrow_ang, prev_phase, W, H, total_cells
+        nonlocal W, H, total_cells, show_compare
         from mazes.random_maze import generate_random_maze
         if cfg.get("maze_kind") == "simple":
             sim.reset()
@@ -438,13 +497,42 @@ def run_main(screen, clock, fonts, sim, cfg):
             sim.reset(generate_random_maze(size=W))
         W, H = sim.true.w, sim.true.h
         total_cells = W * H
-        trail.clear()
-        c = cell_rect(*sim.pos).center
-        anim_xy[0], anim_xy[1] = float(c[0]), float(c[1])
-        arrow_ang = HEADING_ANG[sim.robot.heading]
-        prev_phase = sim.phase
-        auto = True
-        acc = 0.0
+        show_compare = False
+        compare_rows.clear()
+        _after_fresh_start()
+
+    def do_replay():
+        """Replay the SAME maze with the SAME algorithm (X deals a fresh one)."""
+        nonlocal show_compare
+        sim.set_algorithm(sim.algorithm)
+        show_compare = False
+        compare_rows.clear()
+        _after_fresh_start()
+
+    def do_compare():
+        """Race every menu-selected algorithm on THIS maze (fresh sims, so the
+        watched race is untouched) and show the comparison table."""
+        nonlocal show_compare
+        if sim.phase not in ("OPTIMIZE", "DONE"):
+            return
+        if not show_compare and not sim.compare_results:
+            from simulator import Simulator
+            names = list(cfg.get("algos") or [])
+            if len(names) < 2:
+                names = list(ALGO_ORDER)
+            sim.compare_results = [Simulator(sim.true, algorithm=n).run_to_completion(n)
+                                   for n in names]
+        show_compare = not show_compare
+
+    def do_load(i):
+        """Load comparison row i: same maze, that algorithm, auto-run it."""
+        nonlocal show_compare
+        if not sim.compare_results or not (0 <= i < len(sim.compare_results)):
+            return
+        sim.set_algorithm(sim.compare_results[i]["algo"])
+        show_compare = False
+        compare_rows.clear()
+        _after_fresh_start()
 
     def toggle_setting(i):
         nonlocal show_numbers, show_gradient, show_explored, show_path
@@ -498,14 +586,20 @@ def run_main(screen, clock, fonts, sim, cfg):
             if e.type == pygame.QUIT:
                 running = False
             elif e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
-                for b in buttons:
-                    if b.click(e.pos):
-                        break
-                else:
-                    for i, r in enumerate(toggle_rects):
+                if show_compare and any(r.collidepoint(e.pos) for r in compare_rows):
+                    for i, r in enumerate(compare_rows):
                         if r.collidepoint(e.pos):
-                            toggle_setting(i)
+                            do_load(i)
                             break
+                else:
+                    for b in buttons:
+                        if b.click(e.pos):
+                            break
+                    else:
+                        for i, r in enumerate(toggle_rects):
+                            if r.collidepoint(e.pos):
+                                toggle_setting(i)
+                                break
             elif e.type == pygame.KEYDOWN:
                 if e.key == pygame.K_ESCAPE:
                     running = False
@@ -519,6 +613,12 @@ def run_main(screen, clock, fonts, sim, cfg):
                     do_speedrun()
                 elif e.key == pygame.K_x:
                     do_reset()
+                elif e.key == pygame.K_y:
+                    do_replay()
+                elif e.key == pygame.K_c:
+                    do_compare()
+                elif e.key in (pygame.K_1, pygame.K_2, pygame.K_3) and show_compare:
+                    do_load(e.key - pygame.K_1)
                 elif e.key == pygame.K_b:
                     do_menu()
                 elif e.key == pygame.K_n:
@@ -739,16 +839,50 @@ def run_main(screen, clock, fonts, sim, cfg):
             grid_banner("SHORTEST PATH FOUND", "press T (or Speed Run) to sprint it",
                         (40, 150, 80))
 
+        # ---- comparison overlay (same maze, every selected algorithm) ----
+        compare_rows.clear()
+        if show_compare and sim.compare_results:
+            rows = sim.compare_results
+            tw = min(560, grid - 30)
+            rh = 30
+            th = 100 + len(rows) * (rh + 6)
+            rect = pygame.Rect(ox + (grid - tw) // 2, oy + (grid - th) // 2, tw, th)
+            pygame.draw.rect(screen, (8, 8, 12), rect.inflate(8, 8), border_radius=12)
+            pygame.draw.rect(screen, T["panel"], rect, border_radius=10)
+            pygame.draw.rect(screen, path_col, rect, 2, border_radius=10)
+            title = font.render("SAME MAZE — ALGORITHM SHOOTOUT", True, T["text"])
+            screen.blit(title, title.get_rect(center=(rect.centerx, rect.y + 20)))
+            sub = small.render("to-goal: steps at first arrival · walk: full explore+return",
+                               True, T["muted"])
+            screen.blit(sub, sub.get_rect(center=(rect.centerx, rect.y + 40)))
+            for i, row in enumerate(rows):
+                rr = pygame.Rect(rect.x + 16, rect.y + 58 + i * (rh + 6), tw - 32, rh)
+                hov = rr.collidepoint(mouse)
+                pygame.draw.rect(screen, T["btn_hov"] if hov else T["btn"], rr,
+                                 border_radius=6)
+                pygame.draw.rect(screen, T["div"], rr, 1, border_radius=6)
+                goal = str(row["to_goal"]) if row["to_goal"] is not None else "—"
+                mark = "STUCK" if row["stuck"] else "ok"
+                txt = "%d. %-14s goal:%-5s walk:%-5s opt:%-4s %s" % (
+                    i + 1, row["label"][:14], goal, row["walk"],
+                    row["optimal"], mark)
+                img = small.render(txt, True, BACKTRACK_RED if row["stuck"] else T["text"])
+                screen.blit(img, (rr.x + 8, rr.y + 8))
+                compare_rows.append(rr)
+            hint = small.render("click a row or press 1-%d to replay it · C closes" % len(rows),
+                                True, T["muted"])
+            screen.blit(hint, hint.get_rect(center=(rect.centerx, rect.bottom - 12)))
+
         # ---- sidebar ----
         screen.blit(big.render("MARC Micromouse", True, T["text"]), (px, oy + 12))
-        screen.blit(small.render(f"autonomous flood-fill + A*  ·  {W}x{H}",
-                                 True, T["muted"]), (px, oy + 36))
+        screen.blit(small.render("%s explorer + A*  ·  %dx%d" % (
+            ALGOS[sim.algorithm].label, W, H), True, T["muted"]), (px, oy + 36))
         pcol = PHASE_COLORS.get(sim.phase, T["text"])
         badge = pygame.Rect(px, oy + 56, PANEL_W - 16, 30)
         pygame.draw.rect(screen, pcol, badge, border_radius=6)
         img = font.render(
             f"{'● RUNNING' if auto and exploring() or sprinting and auto else '○ PAUSED'}"
-            f"  |  {sim.phase}", True, WHITE)
+            f"  |  {sim.phase}{' · STUCK' if sim.stuck else ''}", True, WHITE)
         screen.blit(img, img.get_rect(center=badge.center))
 
         stats = [
@@ -765,18 +899,18 @@ def run_main(screen, clock, fonts, sim, cfg):
             y0 += 20
         pygame.draw.line(screen, T["div"], (px, oy + 222), (px + PANEL_W - 16, oy + 222), 1)
         screen.blit(font.render("CONTROLS", True, T["muted"]), (px, oy + 226))
-        for b in buttons[:6]:
+        for b in buttons[:8]:
             b.draw(screen, small, mouse, T)
 
-        screen.blit(font.render("SETTINGS", True, T["muted"]), (px, oy + 344))
+        screen.blit(font.render("SETTINGS", True, T["muted"]), (px, oy + 378))
         screen.blit(font.render(f"Speed: {speed:.0f} steps/s  ([-]/[+])", True, T["text"]),
-                    (px, oy + 362))
-        for b in buttons[6:]:
+                    (px, oy + 396))
+        for b in buttons[8:]:
             b.draw(screen, small, mouse, T)
         screen.blit(small.render("Auto-run is ON at launch. SPACE steps,", True, T["muted"]),
-                    (px, oy + 410))
+                    (px, oy + 444))
         screen.blit(small.render("R pauses. B menu. D dark. Toggles:", True, T["muted"]),
-                    (px, oy + 424))
+                    (px, oy + 458))
         for i, (label, get) in enumerate(toggles):
             r = toggle_rects[i]
             on = get()
@@ -788,19 +922,19 @@ def run_main(screen, clock, fonts, sim, cfg):
             screen.blit(small.render(dot + label, True, T["text"]), (r.x + 8, r.y + 4))
 
         # trail key (moved out of the grid overlay into the sidebar)
-        screen.blit(font.render("TRAIL KEY", True, T["muted"]), (px, oy + 516))
+        screen.blit(font.render("TRAIL KEY", True, T["muted"]), (px, oy + 550))
         tx = px
         for label, col in (("explore", ROBOT_BLUE), ("revisit", BACKTRACK_RED),
                            ("sprint", (255, 140, 50))):
-            pygame.draw.circle(screen, col, (tx + 4, oy + 536), 4)
+            pygame.draw.circle(screen, col, (tx + 4, oy + 570), 4)
             img = small.render(label, True, T["text"])
-            screen.blit(img, (tx + 11, oy + 530))
+            screen.blit(img, (tx + 11, oy + 564))
             tx += 11 + img.get_width() + 16
 
         # flood-gradient key: live swatches + what the shades mean right now
         screen.blit(font.render("FLOOD KEY — distance to target", True, T["muted"]),
-                    (px, oy + 556))
-        nsw, bx0, by0 = 10, px, oy + 574
+                    (px, oy + 590))
+        nsw, bx0, by0 = 10, px, oy + 608
         sw = (PANEL_W - 16) // nsw
         for i in range(nsw):
             v = i * dmax / max(1, nsw - 1)
@@ -812,7 +946,7 @@ def run_main(screen, clock, fonts, sim, cfg):
         img = small.render(lab, True, T["text"])
         screen.blit(img, (bx0 + sw * nsw + 1 - img.get_width(), by0 + 14))
         screen.blit(small.render("recomputed every step — shades shift as walls are found",
-                                 True, T["muted"]), (px, oy + 606))
+                                 True, T["muted"]), (px, oy + 640))
 
         screen.blit(small.render("ESC quit", True, T["muted"]),
                     (px, oy + lay.get("panel_h", grid) - 20))
@@ -824,13 +958,15 @@ def _build_sim(cfg):
     from mazes.random_maze import generate_random_maze
     from mazes.simple_maze import build_simple_maze
     from simulator import Simulator
+    algo = cfg.get("algo", "flood")
     if cfg.get("maze_kind") == "simple":
-        return Simulator(build_simple_maze())  # classic layout is 16x16
-    return Simulator(generate_random_maze(cfg.get("seed"), size=cfg.get("size", 16)))
+        return Simulator(build_simple_maze(), algorithm=algo)  # classic is 16x16
+    return Simulator(generate_random_maze(cfg.get("seed"), size=cfg.get("size", 16)),
+                     algorithm=algo)
 
 
 def run_2d(sim=None, maze_kind="random", size=16, seed=None, dark_init=False,
-           use_menu=True):
+           use_menu=True, algo="flood"):
     """Entry point for 2D mode. Loops menu -> race -> menu until quit."""
     pygame.init()
     pygame.display.set_caption("MARC Micromouse — 2D (autonomous)")
@@ -841,7 +977,8 @@ def run_2d(sim=None, maze_kind="random", size=16, seed=None, dark_init=False,
              pygame.font.SysFont("consolas", 12),
              pygame.font.SysFont("consolas", 17, bold=True),
              pygame.font.SysFont("consolas", 20, bold=True))
-    cfg = {"size": size, "maze_kind": maze_kind, "seed": seed, "dark": dark_init}
+    cfg = {"size": size, "maze_kind": maze_kind, "seed": seed, "dark": dark_init,
+           "algos": [algo], "algo": algo}
     show_it = use_menu
     while True:
         if show_it:

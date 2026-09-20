@@ -34,6 +34,7 @@ Troubleshooting:
 python main.py --2d                        # start menu -> pick size, maze, seed
 python main.py --2d --no-menu --size 32    # skip menu, straight to 32x32
 python main.py --headless --size 24 --seed 7
+python main.py --headless --algo dfs       # race the Tremaux DFS explorer
 python main.py --3d --size 20              # Ursina view (best effort, no menu)
 ```
 
@@ -56,6 +57,9 @@ optional numeric seed (empty = fresh every race) and dark mode. Press
 | Click Skip to A\* / S | fast-forward exploration to A\* |
 | Click Speed Run / T | replay A\* optimum from start |
 | Click Reset / X | fresh random maze, restarts autonomously |
+| Click Replay / Y | replay the SAME maze (same algorithm) |
+| Click Compare / C | after a solve: race all selected algos on this maze, table overlay |
+| Click row / 1-3 | in the table: load that algo's replay on the same maze |
 | Click Menu / B | back to the start menu (current race is discarded) |
 | Click - / + or - / + keys | speed 1–30 steps/s |
 | Click toggles or N/G/E/P/M/D | numbers, gradient, explored shade, A\* path, maze ghost, dark mode |
@@ -64,6 +68,19 @@ optional numeric seed (empty = fresh every race) and dark mode. Press
 | ESC | quit |
 
 3D: SPACE step, R auto, S skip, ESC quit.
+
+## Explorer algorithms (pick any in the start menu: F/T/W)
+
+- **Flood-fill** (default) — lowest flood distance; fastest, always terminates.
+- **Tremaux DFS** — depth-first + backtrack; complete but walks much further.
+- **Left-wall follower** — left > straight > right; loops forever on loopy
+  mazes, so a stuck detector ends the run and the badge shows STUCK. That
+  failure is the demo: wall following is not a general solver.
+
+The race runs the first selected algorithm; after solving, **Compare (C)**
+races every selected algorithm on the identical maze and shows to-goal steps,
+full walk and the shared optimum side by side. Replaying never touches the
+maze — only fresh X deals a new one.
 
 ## Side panel
 
