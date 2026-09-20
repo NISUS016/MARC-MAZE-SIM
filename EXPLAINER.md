@@ -141,8 +141,8 @@ maze, New maze (X) deals a fresh one.
    auto-plays — then the tournament auto-loads Dijkstra with an ALGORITHM
    SWITCHED banner and runs it on the identical maze.
 3. (30s) When race 2 finishes, the TOURNAMENT COMPLETE prompt appears — open
-   the stats page (H): bar graphs of to-goal, walk and time with the optimum
-   ticked. Read the twin result aloud.
+   the dashboard (H): head-to-head table, coverage curves, walk splits and
+   incident bars, all live. Read the twin result aloud.
 4. (1 min) Press C for the table, replay a row with 1–2, or X for a fresh
    maze. Optional: dark mode (D), 32x32 board.
 5. (1 min) Close with limitations + one future-work item (Section 10).
@@ -211,6 +211,9 @@ seed sweeps and a results table, then a hardware abstraction layer.
   mapped-so-far maze (they may cut through still-unknown territory, e.g. 14
   believed vs 21 true on seed 11) — that is what the mouse itself would run.
   Shootout tables always use the ground-truth optimum as the shared yardstick.
+- Dashboard panels: HEAD TO HEAD (every metric per algo), COVERAGE (cells
+  mapped vs steps — steeper is smarter), WALK SPLIT (explore vs return with
+  the optimum ticked), INCIDENTS (bumps/revisits/dead ends).
 
 ## 12. Code pointers (for "show me where…" questions)
 
@@ -218,7 +221,7 @@ seed sweeps and a results table, then a hardware abstraction layer.
 - Explorers: `algos.FloodExplorer/DijkstraExplorer/DfsExplorer.select` ·
   stuck guard: `simulator._note_cycle` · same-maze replay:
   `simulator.set_algorithm` · tournament: `view_2d._on_race_end`,
-  stats page: `view_2d.toggle_stats`
+  dashboard: `view_2d.draw_dashboard` (H toggles race/dash)
 - Bump + phases: `simulator.Simulator.step` · A*: `astar.find_path`, `manhattan`
 - Headless races: `simulator.run_to_completion` · compare table: `view_2d.do_compare`
 - Speed-run state: `simulator.start_speedrun/step_speedrun` · maze gen:

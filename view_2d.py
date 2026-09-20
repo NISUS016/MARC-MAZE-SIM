@@ -328,8 +328,8 @@ def run_main(screen, clock, fonts, sim, cfg):
     tourney_results = []  # metrics per finished race, in race order
     tourney_prompt = False  # tournament complete -> offer the stats page
     tourney_total = 1  # algos in this tournament (1 = plain single race)
-    stats_open = False  # visual stats/graphs page (H)
-    overlay_btns = []  # (rect, action) for prompt + stats buttons, rebuilt per frame
+    dash_open = False  # full-window dashboard view (H toggles race/dash)
+    overlay_btns = []  # (rect, action) for prompt + dashboard buttons, per frame
     switch_until = 0  # algo-switch animation expiry (ms ticks)
     switch_label = ""  # label shown by the switch banner
     switch_color = (255, 255, 255)  # new algo's accent color for banner + halo
@@ -555,10 +555,18 @@ def run_main(screen, clock, fonts, sim, cfg):
             "label": ALGOS[sim.algorithm].label,
             "to_goal": sim.steps_to_goal,
             "walk": sim.flood_len if sim.flood_len else sim.steps,
+            "return_steps": ((sim.flood_len - sim.steps_to_goal)
+                             if sim.flood_len and sim.steps_to_goal is not None
+                             else None),
             "optimal": _true_optimum(),
             "solve_time": sim.last_solve_time or 0.0,
             "stuck": sim.stuck,
             "explored": len(sim.explored),
+            "bumps": sim.bumps,
+            "revisits": sim.revisits,
+            "deadends": sim.deadends,
+            "history": {"explored": list(sim.history["explored"]),
+                        "goal_dist": list(sim.history["goal_dist"])},
             "finished": True,
         })
         if tourney_queue:
@@ -609,25 +617,24 @@ def run_main(screen, clock, fonts, sim, cfg):
                                for n in names]
 
     def stats_rows():
-        """Rows for the stats page: tournament log first, else compare table."""
+        """Rows for the dashboard: tournament log first, else compare table."""
         return tourney_results or sim.compare_results
 
-    def toggle_stats():
-        """Open/close the visual stats page (H). Opens the compare table's
+    def toggle_dash():
+        """Toggle the full-window dashboard (H). Opens the compare table's
         data if needed so H always shows something after a solve."""
-        nonlocal stats_open, tourney_prompt
-        if stats_open:
-            stats_open = False
+        nonlocal dash_open, tourney_prompt
+        if dash_open:
+            dash_open = False
             return
         if not stats_rows() and sim.phase in ("OPTIMIZE", "DONE"):
             _race_compare()
-        if stats_rows():
-            stats_open = True
-            tourney_prompt = False
+        dash_open = True
+        tourney_prompt = False
 
-    def _open_stats_from_prompt():
-        nonlocal stats_open, tourney_prompt
-        stats_open = True
+    def _open_dash_from_prompt():
+        nonlocal dash_open, tourney_prompt
+        dash_open = True
         tourney_prompt = False
 
     def _dismiss_prompt():
@@ -681,6 +688,165 @@ def run_main(screen, clock, fonts, sim, cfg):
     running = True
     result = "quit"  # do_menu() flips this to "menu" to return to start menu
 
+    def draw_dashboard():
+        """Full-window dashboard: table + curves + splits. Rendered instead
+        of the race view while dash_open (H toggles)."""
+        T = THEMES["dark" if dark else "light"]
+        mouse = pygame.mouse.get_pos()
+        ww, hh = screen.get_size()
+        rows = stats_rows()
+        screen.fill(T["bg"])
+        pad = 24
+        # header
+        screen.blit(big.render("TOURNAMENT DASHBOARD", True, T["text"]), (pad, 16))
+        maze_info = "%dx%d · seed %s · %d algo%s · optimum %s" % (
+            W, H, cfg.get("seed") if cfg.get("seed") is not None else "random",
+            len(rows), "" if len(rows) == 1 else "s",
+            rows[0]["optimal"] if rows else "—")
+        screen.blit(small.render(maze_info, True, T["muted"]), (pad, 42))
+        close = pygame.Rect(ww - pad - 110, 16, 110, 30)
+        pygame.draw.rect(screen, T["btn"], close, border_radius=6)
+        pygame.draw.rect(screen, T["div"], close, 1, border_radius=6)
+        img = small.render("RACE VIEW (H)", True, T["text"])
+        screen.blit(img, img.get_rect(center=close.center))
+        overlay_btns.clear()
+        overlay_btns.append((close, toggle_dash))
+        if not rows:
+            msg = font.render("No finished races yet — finish a race,", True, T["text"])
+            msg2 = font.render("or press C on a solved maze to compare.", True, T["text"])
+            screen.blit(msg, msg.get_rect(center=(ww // 2, hh // 2 - 14)))
+            screen.blit(msg2, msg2.get_rect(center=(ww // 2, hh // 2 + 14)))
+            return
+        # winner line (fastest to goal; stuck counts as infinity)
+        best = min(rows, key=lambda r: r["to_goal"]
+                   if r["to_goal"] is not None else 10 ** 9)
+        win_txt = "%s wins the goal in %s steps" % (
+            best["label"], best["to_goal"] if best["to_goal"] is not None else "—")
+        screen.blit(font.render(win_txt, True, ALGOS[best["algo"]].color),
+                    (pad, 64))
+        top = 92
+        foot = hh - 30
+        # ---- left: head-to-head table ----
+        tw = min(470, int((ww - 3 * pad) * 0.38))
+        tbox = pygame.Rect(pad, top, tw, foot - top)
+        pygame.draw.rect(screen, T["panel"], tbox, border_radius=8)
+        pygame.draw.rect(screen, T["div"], tbox, 1, border_radius=8)
+        screen.blit(font.render("HEAD TO HEAD", True, T["muted"]), (pad + 14, top + 10))
+        hdr = small.render("algo  goal walk opt time   cov  bmp rev de eff",
+                           True, T["muted"])
+        screen.blit(hdr, (pad + 14, top + 34))
+        for i, r in enumerate(rows):
+            yy = top + 56 + i * 24
+            if yy + 20 > foot - 8:
+                break
+            eff = (r["walk"] / r["optimal"]) if r["optimal"] else 0
+            goal = str(r["to_goal"]) if r["to_goal"] is not None else "—"
+            line = "%-9s %4s %4d %3d %5.2fs %3d %3d %3d %2d %4.1fx" % (
+                r["label"][:9], goal, r["walk"], r["optimal"], r["solve_time"],
+                r["explored"], r["bumps"], r["revisits"], r["deadends"], eff)
+            fg = BACKTRACK_RED if r["stuck"] else T["text"]
+            pygame.draw.circle(screen, ALGOS[r["algo"]].color, (pad + 20, yy + 8), 5)
+            screen.blit(small.render(line, True, fg), (pad + 32, yy))
+        # ---- main: exploration curves (hero chart) ----
+        mx = pad + tw + pad
+        mw = ww - mx - pad
+        ch_h = int((foot - top) * 0.52)
+        cbox = pygame.Rect(mx, top, mw, ch_h)
+        pygame.draw.rect(screen, T["panel"], cbox, border_radius=8)
+        pygame.draw.rect(screen, T["div"], cbox, 1, border_radius=8)
+        screen.blit(font.render("COVERAGE — cells mapped vs steps", True, T["muted"]),
+                    (mx + 14, top + 10))
+        total = max(1, W * H)
+        x_max = max([len(r["history"]["explored"]) for r in rows] + [1])
+        ax_l, ax_b, ax_t, ax_r = 46, 24, 34, 96
+        px0, py0 = mx + ax_l, top + ch_h - ax_b
+        pw, ph = mw - ax_l - ax_r, ch_h - ax_t - ax_b
+        for g in range(5):
+            gy = py0 - int(ph * g / 4)
+            pygame.draw.line(screen, T["div"], (px0, gy), (px0 + pw, gy), 1)
+            lab = small.render(str(int(total * g / 4)), True, T["muted"])
+            screen.blit(lab, (px0 - 8 - lab.get_width(), gy - 7))
+        for g in (0, 1, 2):
+            gx = px0 + int(pw * g / 2)
+            lab = small.render(str(int(x_max * g / 2)), True, T["muted"])
+            screen.blit(lab, (gx - lab.get_width() // 2, py0 + 6))
+        for r in rows:
+            hist = r["history"]["explored"]
+            if len(hist) < 2:
+                continue
+            col = ALGOS[r["algo"]].color
+            pts = [(px0 + int(pw * i / max(1, x_max - 1)),
+                    py0 - int(ph * min(v, total) / total))
+                   for i, v in enumerate(hist)]
+            if len(pts) > 1:
+                pygame.draw.lines(screen, col, False, pts, 2)
+            if r["to_goal"] is not None and r["to_goal"] < len(hist):
+                gx = px0 + int(pw * r["to_goal"] / max(1, x_max - 1))
+                gy = py0 - int(ph * min(hist[r["to_goal"]], total) / total)
+                pygame.draw.circle(screen, WHITE, (gx, gy), 5)
+                pygame.draw.circle(screen, col, (gx, gy), 3)
+        for i, r in enumerate(rows):
+            ly = top + ax_t + 4 + i * 20
+            txt = "%s (%s)" % (r["label"][:12], r["to_goal"]
+                               if r["to_goal"] is not None else "STUCK")
+            img = small.render(txt, True, T["text"])
+            tx = mx + mw - 10 - img.get_width()  # right-aligned: never clipped
+            pygame.draw.circle(screen, ALGOS[r["algo"]].color, (tx - 12, ly + 6), 5)
+            screen.blit(img, (tx, ly))
+        # ---- bottom row: walk split + incident bars ----
+        by = top + ch_h + 12
+        bh = foot - by
+        bw = (mw - 12) // 2
+        sbox = pygame.Rect(mx, by, bw, bh)
+        pygame.draw.rect(screen, T["panel"], sbox, border_radius=8)
+        pygame.draw.rect(screen, T["div"], sbox, 1, border_radius=8)
+        screen.blit(font.render("WALK SPLIT — explore | return", True, T["muted"]),
+                    (mx + 14, by + 8))
+        wmax = max([r["walk"] for r in rows] + [1])
+        opt = rows[0]["optimal"]
+        for i, r in enumerate(rows):
+            ry = by + 30 + i * 24
+            if ry + 16 > by + bh - 4:
+                break
+            ex = r["to_goal"] if r["to_goal"] is not None else r["walk"]
+            bw_all = max(1, int((bw - 120) * r["walk"] / wmax))
+            bw_ex = int(bw_all * min(ex, r["walk"]) / max(1, r["walk"]))
+            pygame.draw.rect(screen, ALGOS[r["algo"]].color,
+                             (mx + 100, ry, max(3, bw_ex), 13), border_radius=3)
+            pygame.draw.rect(screen, T["muted"],
+                             (mx + 100 + bw_ex, ry, max(0, bw_all - bw_ex), 13),
+                             border_radius=3)
+            if opt > 0:
+                oxp = mx + 100 + int((bw - 120) * opt / wmax)
+                pygame.draw.line(screen, WHITE, (oxp, ry - 2), (oxp, ry + 15), 2)
+            screen.blit(small.render(r["label"][:11], True, T["text"]), (mx + 14, ry))
+            screen.blit(small.render(str(r["walk"]), True, T["text"]),
+                        (mx + 100 + bw_all + 6, ry))
+        ibox = pygame.Rect(mx + bw + 12, by, mw - bw - 12, bh)
+        pygame.draw.rect(screen, T["panel"], ibox, border_radius=8)
+        pygame.draw.rect(screen, T["div"], ibox, 1, border_radius=8)
+        screen.blit(font.render("INCIDENTS — bumps / revisits / dead ends",
+                                True, T["muted"]), (ibox.x + 14, by + 8))
+        groups = (("bumps", "bmp"), ("revisits", "rev"), ("deadends", "de"))
+        for gi, (gkey, gshort) in enumerate(groups):
+            gy0 = by + 30 + gi * 30
+            if gy0 + 22 > by + bh - 4:
+                break
+            gmax = max([r[gkey] for r in rows] + [1])
+            screen.blit(small.render(gshort, True, T["muted"]), (ibox.x + 14, gy0 + 2))
+            bx = ibox.x + 52
+            bw_max = ibox.width - 52 - 44
+            sw = bw_max // max(1, len(rows))
+            for i, r in enumerate(rows):
+                hgt = int(20 * r[gkey] / gmax) if gmax > 0 else 0
+                bar = pygame.Rect(bx + i * sw + 2, gy0 + 22 - max(2, hgt),
+                                  sw - 5, max(2, hgt))
+                pygame.draw.rect(screen, ALGOS[r["algo"]].color, bar, border_radius=2)
+                vimg = small.render(str(r[gkey]), True, T["text"])
+                screen.blit(vimg, (bar.right + 4, bar.centery - 7))
+        screen.blit(small.render("H toggles race view · ESC quits · same maze, every bar",
+                                 True, T["muted"]), (pad, foot + 8))
+
     relayout()
     run_btn, step_btn = buttons[0], buttons[1]
     last_size = screen.get_size()
@@ -726,8 +892,8 @@ def run_main(screen, clock, fonts, sim, cfg):
                                 break
             elif e.type == pygame.KEYDOWN:
                 if e.key == pygame.K_ESCAPE:
-                    if stats_open:
-                        stats_open = False  # ESC backs out of overlays first
+                    if dash_open:
+                        dash_open = False  # ESC backs out of dashboard/overlays first
                     elif show_compare:
                         show_compare = False
                     else:
@@ -745,12 +911,12 @@ def run_main(screen, clock, fonts, sim, cfg):
                 elif e.key == pygame.K_y:
                     do_replay()
                 elif e.key == pygame.K_c:
-                    if stats_open:
-                        stats_open = False
+                    if dash_open:
+                        dash_open = False
                     else:
                         do_compare()
                 elif e.key == pygame.K_h:
-                    toggle_stats()
+                    toggle_dash()
                 elif e.key in (pygame.K_1, pygame.K_2, pygame.K_3) and show_compare:
                     do_load(e.key - pygame.K_1)
                 elif e.key == pygame.K_b:
@@ -822,6 +988,13 @@ def run_main(screen, clock, fonts, sim, cfg):
         diff = (target_ang - arrow_ang + math.pi) % (2 * math.pi) - math.pi
         max_turn = 12.0 * dt
         arrow_ang += max(-max_turn, min(max_turn, diff))
+
+        if dash_open:
+            # Dashboard takes the whole window; the race keeps stepping
+            # underneath so it live-updates during tournaments.
+            draw_dashboard()
+            pygame.display.flip()
+            continue
 
         # ---- draw ----
         screen.fill(T["bg"])
@@ -1038,72 +1211,9 @@ def run_main(screen, clock, fonts, sim, cfg):
                                 True, T["muted"])
             screen.blit(hint, hint.get_rect(center=(rect.centerx, rect.bottom - 12)))
 
-        # ---- stats page: visual bar-graph comparison (H) ----
-        overlay_btns.clear()
-        if stats_open and stats_rows():
-            srows = stats_rows()
-            tw = min(660, grid - 16)
-            chart_h = 100
-            th = 76 + 3 * chart_h + 30
-            rect = pygame.Rect(ox + (grid - tw) // 2,
-                               oy + max(8, (grid - th) // 2), tw, th)
-            pygame.draw.rect(screen, (8, 8, 12), rect.inflate(8, 8), border_radius=12)
-            pygame.draw.rect(screen, T["panel"], rect, border_radius=10)
-            pygame.draw.rect(screen, path_col, rect, 2, border_radius=10)
-            title = font.render("TOURNAMENT STATS — SAME MAZE", True, T["text"])
-            screen.blit(title, title.get_rect(center=(rect.centerx, rect.y + 20)))
-            sub = small.render("longer bar = slower · white tick = true optimum",
-                               True, T["muted"])
-            screen.blit(sub, sub.get_rect(center=(rect.centerx, rect.y + 40)))
-            close = pygame.Rect(rect.right - 108, rect.y + 10, 96, 26)
-            pygame.draw.rect(screen, T["btn"], close, border_radius=6)
-            pygame.draw.rect(screen, T["div"], close, 1, border_radius=6)
-            img = small.render("CLOSE (H)", True, T["text"])
-            screen.blit(img, img.get_rect(center=close.center))
-            overlay_btns.append((close, toggle_stats))
-            charts = (("Steps to first goal", "to_goal", False),
-                      ("Full walk (explore + return)", "walk", True),
-                      ("Solve time (seconds)", "solve_time", False))
-            for ci, (clabel, ckey, with_opt) in enumerate(charts):
-                cy0 = rect.y + 62 + ci * chart_h
-                screen.blit(font.render(clabel, True, T["muted"]),
-                            (rect.x + 16, cy0))
-                vals = []
-                for r in srows:
-                    v = r[ckey]
-                    if v is None:  # stuck with no goal time: rank by full walk
-                        v = r["walk"]
-                    vals.append(v)
-                vmax = max(vals + [1e-9])
-                opt = srows[0]["optimal"]
-                for i, r in enumerate(srows):
-                    by = cy0 + 22 + i * 22
-                    lab = small.render(r["label"][:12], True, T["text"])
-                    screen.blit(lab, (rect.x + 16, by))
-                    bx = rect.x + 130
-                    bw_max = tw - 130 - 110
-                    w = int(bw_max * vals[i] / vmax) if vmax > 0 else 0
-                    bar = pygame.Rect(bx, by + 1, max(4, w), 13)
-                    col = BACKTRACK_RED if (r["stuck"] and ckey == "to_goal") \
-                        else ALGOS[r["algo"]].color
-                    pygame.draw.rect(screen, col, bar, border_radius=3)
-                    if with_opt and opt > 0:
-                        oxp = bx + int(bw_max * opt / vmax)
-                        pygame.draw.line(screen, WHITE, (oxp, by - 2),
-                                         (oxp, by + 16), 2)
-                    if ckey == "solve_time":
-                        vtxt = "%.2fs" % vals[i]
-                    else:
-                        vtxt = "%d%s" % (vals[i], " STUCK" if r["stuck"] and
-                                         ckey == "to_goal" else "")
-                    screen.blit(small.render(vtxt, True, T["text"]),
-                                (bx + bw_max + 8, by))
-            foot = small.render("H closes · every bar raced on this exact maze",
-                                True, T["muted"])
-            screen.blit(foot, foot.get_rect(center=(rect.centerx, rect.bottom - 12)))
-
-        # ---- tournament-complete prompt (View stats / Dismiss) ----
-        if tourney_prompt and not stats_open:
+        # ---- tournament-complete prompt (View dashboard / Dismiss) ----
+        # (skipped while the dashboard itself is open — that IS the destination)
+        if tourney_prompt and not dash_open:
             pw = 440
             pr = pygame.Rect(ox + (grid - pw) // 2, oy + grid - 120, pw, 78)
             pygame.draw.rect(screen, (8, 8, 12), pr.inflate(6, 6), border_radius=12)
@@ -1114,7 +1224,7 @@ def run_main(screen, clock, fonts, sim, cfg):
             screen.blit(msg, msg.get_rect(center=(pr.centerx, pr.y + 20)))
             b1 = pygame.Rect(pr.x + 16, pr.y + 38, (pw - 48) // 2, 28)
             b2 = pygame.Rect(pr.x + 32 + (pw - 48) // 2, pr.y + 38, (pw - 48) // 2, 28)
-            for br, txt, acc, fn in ((b1, "View stats (H)", True, _open_stats_from_prompt),
+            for br, txt, acc, fn in ((b1, "View dashboard (H)", True, _open_dash_from_prompt),
                                      (b2, "Dismiss", False, _dismiss_prompt)):
                 hov = br.collidepoint(mouse)
                 col = BTN_ACC if acc else (T["btn_hov"] if hov else T["btn"])

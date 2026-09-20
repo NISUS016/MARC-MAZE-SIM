@@ -5,7 +5,7 @@ Phases: EXPLORE_TO_GOAL -> RETURN_TO_START -> OPTIMIZE (A*) -> DONE.
 """
 from algos import ALGOS
 from astar import find_path
-from floodfill import choose_next, compute_distances
+from floodfill import INF, choose_next, compute_distances
 from maze import START, center_goals
 from robot import Robot
 
@@ -56,6 +56,11 @@ class Simulator:
         self.steps_to_goal = None  # steps at first goal arrival (None if stuck)
         self.race_t0 = _time.perf_counter()  # wall-clock start of this race
         self.last_solve_time = None  # seconds explore+return took (set at OPTIMIZE)
+        # Dashboard telemetry (cheap ints; powers curves + efficiency stats).
+        self.bumps = 0  # attempted moves into true walls
+        self.revisits = 0  # moves into already-explored cells
+        self.deadends = 0  # newly mapped cells with 3 walls
+        self.history = {"explored": [], "goal_dist": []}  # per-step trace
         # Speed-run animation state (replays optimal_path after OPTIMIZE).
         self.speedrun_active = False
         self.speedrun_idx = 0
@@ -73,9 +78,20 @@ class Simulator:
     def _discover(self):
         x, y = self.robot.pos
         self.known.discover(self.true, x, y)
-        self.explored.add((x, y))
+        if (x, y) not in self.explored:
+            self.explored.add((x, y))
+            if sum(self.known.walls_of(x, y).values()) == 3:
+                self.deadends += 1
         if not self.explore_path or self.explore_path[-1] != (x, y):
             self.explore_path.append((x, y))
+
+    def _log_history(self):
+        """One cheap trace point per step for dashboard curves."""
+        if self.phase not in ("EXPLORE_TO_GOAL", "RETURN_TO_START"):
+            return
+        d = self.dist[self.robot.x][self.robot.y]
+        self.history["explored"].append(len(self.explored))
+        self.history["goal_dist"].append(d if d < INF else -1)
 
     # -- public API used by views -------------------------------------------
     def step(self):
@@ -131,10 +147,15 @@ class Simulator:
             self.known.set_wall(x, y, bump_dir, True)  # learn the wall
             self.dist = compute_distances(self.known, self._target())
             self.steps += 1  # bumping still costs a step, but no cell change
+            self.bumps += 1
+            self._log_history()
             return self.phase
+        if (nx, ny) in self.explored:
+            self.revisits += 1
         self.robot.move_to(nx, ny)
         self.steps += 1
         self._discover()
+        self._log_history()
         return self.phase
 
     def _note_cycle(self):
@@ -163,15 +184,23 @@ class Simulator:
         # the comparison table shares one yardstick (a stuck run only maps
         # part of the maze, so its known-map A* would under-read).
         true_path = find_path(self.true, self.start, self.goals)
+        walk = self.flood_len if self.flood_len else self.steps
+        to_goal = self.steps_to_goal
         return {
             "algo": name,
             "label": ALGOS[name].label,
-            "to_goal": self.steps_to_goal,
-            "walk": self.flood_len if self.flood_len else self.steps,
+            "to_goal": to_goal,
+            "walk": walk,
+            "return_steps": (walk - to_goal) if to_goal is not None else None,
             "optimal": max(0, len(true_path) - 1),
             "solve_time": self.last_solve_time if self.last_solve_time else 0.0,
             "stuck": self.stuck,
             "explored": len(self.explored),
+            "bumps": self.bumps,
+            "revisits": self.revisits,
+            "deadends": self.deadends,
+            "history": {"explored": list(self.history["explored"]),
+                        "goal_dist": list(self.history["goal_dist"])},
             "finished": self.phase in ("OPTIMIZE", "DONE"),
         }
 

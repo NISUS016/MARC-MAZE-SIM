@@ -60,7 +60,7 @@ optional numeric seed (empty = fresh every race) and dark mode. Press
 | Click Replay / Y | replay the SAME maze (same algorithm) |
 | Click Compare / C | after a solve: race all selected algos on this maze, table overlay |
 | Click row / 1-3 | in the table: load that algo's replay on the same maze |
-| H | visual stats page: bar graphs comparing the raced algorithms |
+| H | full-window dashboard: head-to-head table, coverage curves, splits |
 | Click Menu / B | back to the start menu (current race is discarded) |
 | Click - / + or - / + keys | speed 1–30 steps/s |
 | Click toggles or N/G/E/P/M/D | numbers, gradient, explored shade, A\* path, maze ghost, dark mode |
@@ -82,8 +82,11 @@ optional numeric seed (empty = fresh every race) and dark mode. Press
 
 Select two or three and they race as a **tournament** on one maze: the first
 runs, then each next auto-loads with an ALGORITHM SWITCHED animation, and when
-the last finishes a prompt offers the visual **stats page (H)** — bar graphs
-of steps-to-goal, full walk and solve time with the true optimum ticked.
+the last finishes a prompt offers the **dashboard (H)** — a full-window view
+with a head-to-head table (to-goal, walk, optimum, time, coverage, bumps,
+revisits, dead ends, efficiency), coverage curves showing cells mapped vs
+steps, walk-split bars with the optimum ticked, and incident bars. It stays
+live while later races run.
 A race **stopwatch** runs bottom-right of the grid and freezes at the solve.
 The sprint auto-plays the moment the shortest route exists. Replaying never
 touches the maze — only fresh X deals a new one.
