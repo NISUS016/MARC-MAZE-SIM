@@ -319,6 +319,9 @@ def run_main(screen, clock, fonts, sim, cfg):
     acc = 0.0
     show_compare = False  # comparison table overlay (C after a solved race)
     compare_rows = []  # clickable row rects, rebuilt every frame while open
+    switch_until = 0  # algo-switch animation expiry (ms ticks)
+    switch_label = ""  # label shown by the switch banner
+    switch_color = (255, 255, 255)  # new algo's accent color for banner + halo
 
     lay = {}  # ox/oy/px/cell/grid, recomputed when the window size changes
     last_size = None
@@ -478,9 +481,10 @@ def run_main(screen, clock, fonts, sim, cfg):
 
     def _after_fresh_start():
         """Resync view animation with a freshly reset sim (replay/load/new)."""
-        nonlocal auto, acc, arrow_ang, prev_phase
+        nonlocal auto, acc, arrow_ang, prev_phase, switch_until
         trail.clear()
         discover_walls.clear()
+        switch_until = 0
         c = cell_rect(*sim.pos).center
         anim_xy[0], anim_xy[1] = float(c[0]), float(c[1])
         arrow_ang = HEADING_ANG[sim.robot.heading]
@@ -526,13 +530,20 @@ def run_main(screen, clock, fonts, sim, cfg):
 
     def do_load(i):
         """Load comparison row i: same maze, that algorithm, auto-run it."""
-        nonlocal show_compare
+        nonlocal show_compare, switch_until, switch_label, switch_color
         if not sim.compare_results or not (0 <= i < len(sim.compare_results)):
             return
-        sim.set_algorithm(sim.compare_results[i]["algo"])
+        new_algo = sim.compare_results[i]["algo"]
+        changed = (new_algo != sim.algorithm)
+        sim.set_algorithm(new_algo)
         show_compare = False
         compare_rows.clear()
         _after_fresh_start()
+        if changed:
+            # algo-switch animation: banner + halo in the new algo's color
+            switch_label = ALGOS[new_algo].label
+            switch_color = ALGOS[new_algo].color
+            switch_until = pygame.time.get_ticks() + 2500
 
     def toggle_setting(i):
         nonlocal show_numbers, show_gradient, show_explored, show_path
@@ -725,7 +736,7 @@ def run_main(screen, clock, fonts, sim, cfg):
             pw = max(2, int(4 * SC + (2 if sprinting and
                                       abs(math.sin(now / 180.0)) > 0.5 else 0)))
             if len(pts) > 1:
-                if sprinting:
+                if sprinting:  # halo underlay
                     pygame.draw.lines(screen, (255, 150, 60), False, pts, pw + 5)
                 pygame.draw.lines(screen, path_col, False, pts, pw)
             for p in pts:
@@ -768,8 +779,10 @@ def run_main(screen, clock, fonts, sim, cfg):
         R = max(6, int(13 * SC))
         AL = max(7, int(12 * SC))
         rcol = ROBOT_SPRINT if sprinting else ROBOT_BLUE
-        if sprinting:
+        if sprinting:  # sprint glow halo
             pygame.draw.circle(screen, (255, 150, 60), rc, R + 4)
+        if now < switch_until:  # algo-switch flash in the new algo's color
+            pygame.draw.circle(screen, switch_color, rc, R + 6)
         pygame.draw.circle(screen, rcol, rc, R)
         pygame.draw.circle(screen, WHITE, rc, R, 2)
         ex = rc[0] + AL * math.cos(arrow_ang)
@@ -829,7 +842,10 @@ def run_main(screen, clock, fonts, sim, cfg):
             img2 = small.render(sub, True, WHITE)
             screen.blit(img2, img2.get_rect(center=(rect.centerx, rect.centery + 13)))
 
-        if sprinting:
+        if now < switch_until:
+            grid_banner("ALGORITHM SWITCHED", "now racing: %s" % switch_label,
+                        switch_color)
+        elif sprinting:
             grid_banner("SPEEDRUN — SPRINTING THE OPTIMUM", "fastest known route, full speed",
                         (200, 50, 40))
         elif sim.phase == "DONE":
@@ -843,7 +859,7 @@ def run_main(screen, clock, fonts, sim, cfg):
         compare_rows.clear()
         if show_compare and sim.compare_results:
             rows = sim.compare_results
-            tw = min(560, grid - 30)
+            tw = min(600, grid - 20)
             rh = 30
             th = 100 + len(rows) * (rh + 6)
             rect = pygame.Rect(ox + (grid - tw) // 2, oy + (grid - th) // 2, tw, th)
@@ -852,7 +868,7 @@ def run_main(screen, clock, fonts, sim, cfg):
             pygame.draw.rect(screen, path_col, rect, 2, border_radius=10)
             title = font.render("SAME MAZE — ALGORITHM SHOOTOUT", True, T["text"])
             screen.blit(title, title.get_rect(center=(rect.centerx, rect.y + 20)))
-            sub = small.render("to-goal: steps at first arrival · walk: full explore+return",
+            sub = small.render("to-goal · walk · optimum · wall-clock solve time",
                                True, T["muted"])
             screen.blit(sub, sub.get_rect(center=(rect.centerx, rect.y + 40)))
             for i, row in enumerate(rows):
@@ -863,11 +879,13 @@ def run_main(screen, clock, fonts, sim, cfg):
                 pygame.draw.rect(screen, T["div"], rr, 1, border_radius=6)
                 goal = str(row["to_goal"]) if row["to_goal"] is not None else "—"
                 mark = "STUCK" if row["stuck"] else "ok"
-                txt = "%d. %-14s goal:%-5s walk:%-5s opt:%-4s %s" % (
-                    i + 1, row["label"][:14], goal, row["walk"],
-                    row["optimal"], mark)
+                txt = "%d. %-18s goal:%-5s walk:%-5s opt:%-4s %-7s %s" % (
+                    i + 1, row["label"][:18], goal, row["walk"],
+                    row["optimal"], "%.2fs" % row.get("solve_time", 0.0), mark)
+                pygame.draw.circle(screen, ALGOS[row["algo"]].color,
+                                   (rr.x + 12, rr.y + rh // 2), 5)
                 img = small.render(txt, True, BACKTRACK_RED if row["stuck"] else T["text"])
-                screen.blit(img, (rr.x + 8, rr.y + 8))
+                screen.blit(img, (rr.x + 24, rr.y + 8))
                 compare_rows.append(rr)
             hint = small.render("click a row or press 1-%d to replay it · C closes" % len(rows),
                                 True, T["muted"])
@@ -888,7 +906,8 @@ def run_main(screen, clock, fonts, sim, cfg):
         stats = [
             f"Steps: {sim.steps}",
             f"Explored: {len(sim.explored)}/{total_cells}",
-            f"Flood walk: {sim.flood_len if sim.flood_len else '…'}",
+            f"Flood walk: {sim.flood_len if sim.flood_len else '…'}"
+            + (f" · {sim.last_solve_time:.2f}s" if sim.last_solve_time else ""),
             f"A* optimal: {sim.astar_len if sim.optimal_path else '…'}",
             f"Pos: {sim.pos}  hd:{sim.robot.heading}",
             f"Speed: {speed:.0f} steps/s{' x2 SPRINT' if sprinting else ''}",

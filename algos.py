@@ -23,6 +23,7 @@ class Explorer:
     key = "?"            # CLI / config id
     label = "?"          # sidebar + table display name
     menu_key = None      # start-menu toggle key (pygame K_*)
+    color = (200, 200, 200)  # UI accent: menu dots, switch banner, trail legend
     blurb = ""           # one-line description for menu/docs
 
     def select(self, sim):
@@ -34,6 +35,7 @@ class FloodExplorer(Explorer):
     key = "flood"
     label = "Flood-fill"
     menu_key = "F"
+    color = (50, 120, 220)
     blurb = "lowest flood distance; fastest, near-optimal"
 
     def select(self, sim):
@@ -45,6 +47,7 @@ class DfsExplorer(Explorer):
     key = "dfs"
     label = "Tremaux DFS"
     menu_key = "T"
+    color = (150, 100, 220)
     blurb = "depth-first + backtrack; complete but long-winded"
 
     def select(self, sim):
@@ -82,6 +85,7 @@ class WallExplorer(Explorer):
     key = "wall"
     label = "Left-wall follower"
     menu_key = "W"
+    color = (235, 140, 50)
     blurb = "left > straight > right; loops forever on loopy mazes"
 
     _ORDER = {

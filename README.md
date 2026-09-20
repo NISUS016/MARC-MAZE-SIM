@@ -79,8 +79,10 @@ optional numeric seed (empty = fresh every race) and dark mode. Press
 
 The race runs the first selected algorithm; after solving, **Compare (C)**
 races every selected algorithm on the identical maze and shows to-goal steps,
-full walk and the shared optimum side by side. Replaying never touches the
-maze — only fresh X deals a new one.
+full walk, the shared optimum and wall-clock solve time side by side. Loading
+a different algorithm flashes an **ALGORITHM SWITCHED** banner and halo in
+that algorithm's color (blue flood, purple DFS, orange wall-follow). Replaying
+never touches the maze — only fresh X deals a new one.
 
 ## Side panel
 

@@ -112,11 +112,17 @@ gap grows with maze size — that gap IS the cost of not having a map."
 
 ## 7b. Same-maze algorithm shootout (seed 11, 16x16 — via Compare (C))
 
-| Explorer | To goal | Full walk | Optimum | Verdict |
-|----------|---------|-----------|---------|---------|
-| Flood-fill | 25 | 46 | 21 | solved, near-optimal |
-| Tremaux DFS | 153 | 174 | 21 | solved, 6x the cost |
-| Left-wall follower | — | 817 then STUCK | 21 | loops forever on loopy mazes |
+| Explorer | To goal | Full walk | Optimum | Solve time | Verdict |
+|----------|---------|-----------|---------|------------|---------|
+| Flood-fill | 25 | 46 | 21 | ~0.03s | solved, near-optimal |
+| Tremaux DFS | 153 | 174 | 21 | ~0.12s | solved, 6x the cost |
+| Left-wall follower | — | 817 then STUCK | 21 | ~0.5s | loops forever on loopy mazes |
+
+(Solve times are wall-clock on a laptop, PyPy-speed dependent — the step
+counts are the architecture-independent result; times just show all three
+finish instantly.) Loading a different row flashes an ALGORITHM SWITCHED
+banner plus a halo in that explorer's color, so the audience always knows
+which brain is driving.
 
 Takeaway line: "Three algorithms, one maze: flood-fill wins, DFS pays 6x for
 no map, and wall following provably fails where loops exist — which is why

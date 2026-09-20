@@ -9,6 +9,8 @@ from floodfill import choose_next, compute_distances
 from maze import START, center_goals
 from robot import Robot
 
+import time as _time
+
 
 class Simulator:
     def __init__(self, true_maze, start=START, goals=None, algorithm="flood"):
@@ -52,6 +54,8 @@ class Simulator:
         self.algo_state = {}  # per-explorer memory (DFS stack, cycle counts)
         self.stuck = False  # True if the explorer looped / gave up
         self.steps_to_goal = None  # steps at first goal arrival (None if stuck)
+        self.race_t0 = _time.perf_counter()  # wall-clock start of this race
+        self.last_solve_time = None  # seconds explore+return took (set at OPTIMIZE)
         # Speed-run animation state (replays optimal_path after OPTIMIZE).
         self.speedrun_active = False
         self.speedrun_idx = 0
@@ -165,6 +169,7 @@ class Simulator:
             "to_goal": self.steps_to_goal,
             "walk": self.flood_len if self.flood_len else self.steps,
             "optimal": max(0, len(true_path) - 1),
+            "solve_time": self.last_solve_time if self.last_solve_time else 0.0,
             "stuck": self.stuck,
             "explored": len(self.explored),
             "finished": self.phase in ("OPTIMIZE", "DONE"),
@@ -173,6 +178,7 @@ class Simulator:
     def _run_optimization(self):
         """Phase 2: A* on the now-complete known map (§12)."""
         self.flood_len = len(self.explore_path) - 1
+        self.last_solve_time = _time.perf_counter() - self.race_t0
         # By now known == true for all visited cells; assume full enough.
         # Fall back to true maze for guaranteed optimal display.
         self.optimal_path = find_path(self.known, self.start, self.goals) or \
