@@ -110,6 +110,30 @@ and to drive the speed-run replay.
 Takeaway line: "Exploration consistently costs 2–7x the optimal path, and the
 gap grows with maze size — that gap IS the cost of not having a map."
 
+## 7c. Batch evidence — 100 shared seeds, 16x16 (`python batch.py`)
+
+Single-maze anecdotes don't justify an algorithm choice; this does. Every
+explorer raced the same 100 mazes (seeds 0–99), 300 races total:
+
+| Explorer | Mean to-goal | Mean walk | Mean efficiency | Seeds won |
+|----------|--------------|-----------|-----------------|-----------|
+| Flood-fill | 38.0 ± 21.4 | 72.4 | 3.11× optimal | 60 |
+| Dijkstra | 39.2 ± 23.0 | 73.5 | 3.16× optimal | 67 |
+| Tremaux DFS | 123.2 ± 89.1 | 159.8 | 7.23× optimal | 17 |
+
+Figures in `batch_results/` (regenerate anytime; outputs are git-ignored):
+`fig_means.png`, `fig_box.png` (efficiency distribution), `fig_wins.png`,
+`fig_scale.png` (with multiple `--sizes`), plus `results.csv` + `summary.json`.
+
+Reading the result honestly: flood-fill is the pick on the lowest mean
+(38.0) and tightest spread, but Dijkstra wins *more seeds* (67 vs 60) —
+the two tie outright wherever their greedy cores agree, and Dijkstra loses
+worse on the boards where they disagree (std 23.0 vs 21.4). DFS is outclassed
+everywhere (mean 123, efficiency spread to 20×). So the justified claim is:
+"flood-fill for the STM32: best average cost, lowest variance, simplest code —
+Dijkstra kept as the reference twin." That nuance is stronger in viva than a
+sweep would be.
+
 ## 7b. Same-maze algorithm shootout (seed 11, 16x16 — via Compare (C))
 
 | Explorer | To goal | Full walk | Optimum | Solve time | Verdict |

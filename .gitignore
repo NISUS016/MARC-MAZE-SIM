@@ -19,3 +19,6 @@ Thumbs.db
 
 # Test screenshots / scratch output
 *_screenshot.png
+
+# batch.py sweep outputs (regenerate with: python batch.py)
+batch_results/

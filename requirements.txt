@@ -1,4 +1,5 @@
 pygame-ce>=2.5.0
+matplotlib>=3.8  # batch.py evidence sweep only (headless figures)
 # NOTE: use the pygame-ce distribution name, not "pygame".
 # "pygame" 2.6.1 on PyPI has no prebuilt wheel for Python 3.14, so pip
 # tries to compile it from source and fails (MSVC/distutils error).

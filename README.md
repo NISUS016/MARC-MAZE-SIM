@@ -47,6 +47,19 @@ The start menu offers sizes 16/20/24/28/32, Random vs Classic-16 layout, an
 optional numeric seed (empty = fresh every race) and dark mode. Press
 **New maze (X)** in the GUI for another board of the same size.
 
+## Batch evidence sweep (`batch.py` — needs matplotlib)
+
+```bash
+python batch.py                              # 100 seeds × 3 algos, 16x16
+python batch.py --seeds 200 --sizes 16 24 32 # bigger evidence set
+```
+
+Races every explorer on the same shared seeds into `batch_results/`
+(`results.csv`, `summary.json`, `fig_means.png`, `fig_box.png`,
+`fig_wins.png`, `fig_scale.png`). Headline from 100 seeds: flood-fill mean
+38.0 to-goal steps, Dijkstra 39.2, DFS 123.2 — flood-fill is the justified
+pick (full breakdown in `EXPLAINER.md` §7c).
+
 ## Controls (2D — autonomous by default)
 
 | Input | Action |
