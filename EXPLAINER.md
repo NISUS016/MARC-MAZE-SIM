@@ -110,29 +110,37 @@ and to drive the speed-run replay.
 Takeaway line: "Exploration consistently costs 2–7x the optimal path, and the
 gap grows with maze size — that gap IS the cost of not having a map."
 
-## 7c. Batch evidence — 100 shared seeds, 16x16 (`python batch.py`)
+## 7c. Batch evidence — 100 shared seeds each, 16x16 and 32x32 (`python batch.py`)
 
 Single-maze anecdotes don't justify an algorithm choice; this does. Every
-explorer raced the same 100 mazes (seeds 0–99), 300 races total:
+explorer raced the same 200 mazes (seeds 0–99 per size), 600 races total:
 
-| Explorer | Mean to-goal | Mean walk | Mean efficiency | Seeds won |
-|----------|--------------|-----------|-----------------|-----------|
-| Flood-fill | 38.0 ± 21.4 | 72.4 | 3.11× optimal | 60 |
-| Dijkstra | 39.2 ± 23.0 | 73.5 | 3.16× optimal | 67 |
-| Tremaux DFS | 123.2 ± 89.1 | 159.8 | 7.23× optimal | 17 |
+| Board | Explorer | Mean to-goal | Mean walk | Mean efficiency | Seeds won |
+|-------|----------|--------------|-----------|-----------------|-----------|
+| 16x16 | Flood-fill | 38.0 ± 21.4 | 72.4 | 3.11× | 60 |
+| 16x16 | Dijkstra | 39.2 ± 23.0 | 73.5 | 3.16× | 67 |
+| 16x16 | Tremaux DFS | 123.2 ± 89.1 | 159.8 | 7.23× | 17 |
+| 32x32 | Flood-fill | 95.9 ± 50.8 | 190.6 | 4.02× | 49* |
+| 32x32 | Dijkstra | 93.5 ± 45.9 | 186.2 | 3.93× | 57* |
+| 32x32 | Tremaux DFS | 578.0 ± 409.6 | 660.5 | 13.95× | 5* |
+
+(*32x32 wins split from the 109/124/22 totals; ties shared wherever the two
+greedy cores agree.)
 
 Figures in `batch_results/` (regenerate anytime; outputs are git-ignored):
 `fig_means.png`, `fig_box.png` (efficiency distribution), `fig_wins.png`,
-`fig_scale.png` (with multiple `--sizes`), plus `results.csv` + `summary.json`.
+`fig_scale.png` (walk vs board cells — the gap visibly widens), plus
+`results.csv` + `summary.json`.
 
-Reading the result honestly: flood-fill is the pick on the lowest mean
-(38.0) and tightest spread, but Dijkstra wins *more seeds* (67 vs 60) —
-the two tie outright wherever their greedy cores agree, and Dijkstra loses
-worse on the boards where they disagree (std 23.0 vs 21.4). DFS is outclassed
-everywhere (mean 123, efficiency spread to 20×). So the justified claim is:
-"flood-fill for the STM32: best average cost, lowest variance, simplest code —
-Dijkstra kept as the reference twin." That nuance is stronger in viva than a
-sweep would be.
+Read the result honestly: flood-fill and Dijkstra tie within 5% on quality at
+both sizes — quality alone cannot split them, and saying otherwise would be
+lying with statistics. What splits them is compute: flood-fill is consistently
+cheaper per race (0.052s vs 0.062s on 16x16, 0.565s vs 0.653s on 32x32) with
+simpler code (one BFS + array vs heap + predecessor pointers) — and compute
+plus code size are exactly the currencies that matter on an STM32. So the
+justified claim is: "tied path quality, cheapest compute, simplest code —
+flood-fill for the microcontroller, Dijkstra kept as the reference twin."
+DFS is outclassed everywhere (mean 123/578, efficiency spread to 20×).
 
 ## 7b. Same-maze algorithm shootout (seed 11, 16x16 — via Compare (C))
 

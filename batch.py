@@ -204,16 +204,27 @@ def main():
                         if k in w.fieldnames})
 
     summary, wins, nseeds = summarize(rows)
-    order = sorted(ALGO_ORDER,
-                   key=lambda a: sum(summary[f"{s}/{a}"]["mean_goal"] or 10 ** 9
-                                     for s in args.sizes))
-    means = ", ".join(f"{ALGOS[a].label} {sum(summary[f'{s}/{a}']['mean_goal'] or 0 for s in args.sizes) / len(args.sizes):.1f}"
-                      for a in order)
+    means = {a: sum(summary[f"{s}/{a}"]["mean_goal"] or 10 ** 9
+                    for s in args.sizes) / len(args.sizes) for a in ALGO_ORDER}
+    times = {a: sum(summary[f"{s}/{a}"]["mean_time"] for s in args.sizes) / len(args.sizes)
+             for a in ALGO_ORDER}
+    order = sorted(ALGO_ORDER, key=lambda a: means[a])
+    rank = ", ".join(f"{ALGOS[a].label} {means[a]:.1f}" for a in order)
+    gap = (means[order[1]] - means[order[0]]) / max(means[order[0]], 1e-9)
     wsplit = "/".join(str(wins[a]) for a in ALGO_ORDER)
-    verdict = (f"{ALGOS[order[0]].label} is the pick: lowest mean to-goal "
-               f"({means}) over {nseeds} shared seeds; seed wins "
-               f"flood/dijkstra/dfs = {wsplit} (ties shared — flood and "
-               f"Dijkstra tie outright wherever their greedy cores agree).")
+    verdict = f"Quality rank (mean to-goal): {rank}. "
+    if gap < 0.05:
+        cheap = min(order[:2], key=lambda a: times[a])
+        verdict += (f"Top two tie within 5% — quality alone cannot split them. "
+                    f"Compute breaks it ({ALGOS[order[0]].label} "
+                    f"{times[order[0]]:.3f}s vs {ALGOS[order[1]].label} "
+                    f"{times[order[1]]:.3f}s mean per race) -> "
+                    f"{ALGOS[cheap].label} recommended: tied quality, cheapest "
+                    f"compute, simplest code. Seed wins flood/dijkstra/dfs = "
+                    f"{wsplit} (ties shared).")
+    else:
+        verdict += (f"Clear winner on quality. Seed wins flood/dijkstra/dfs = "
+                    f"{wsplit} (ties shared).")
     with open(os.path.join(args.out, "summary.json"), "w") as f:
         json.dump({"seeds": args.seeds, "sizes": args.sizes, "summary": summary,
                    "wins": wins, "verdict": verdict}, f, indent=2)
